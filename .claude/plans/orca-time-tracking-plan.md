@@ -3,7 +3,7 @@
 **Feature ID:** orca-time-tracking
 **Repo:** orca
 **Issue:** none
-**Upstream:** none
+**Upstream:** none <!-- intentional exception: spec skipped by explicit user decision (requirements settled in-session); plan is the root artifact -->
 **Date:** 2026-06-04
 **Status:** Planned
 
@@ -48,21 +48,21 @@ export interface ProjectContext {
   branch: string // '' if unknown
 }
 
-/** Raw ping from the renderer — main builds ProjectContext from it. */
+/** Raw ping from the renderer — IDs only. Main resolves Repo/Worktree from the
+ *  Store (source of truth) and decides remote-skip itself; it never trusts
+ *  renderer-provided paths or flags. */
 export interface ActivityPing {
-  repoPath: string
-  remote: boolean // Repo.connectionId != null ⇒ main drops the ping
-  worktreePath: string
-  branch: string
+  repoId: string
+  worktreeId: string
 }
 
 export type TrackerEvent = 'focus' | 'blur' | 'idle' | 'active'
 
 export interface TimeTrackerConfig {
   baseUrl: string // TIME_TRACKER_BASE_URL ?? 'http://localhost:47321' (see Risks: packaged .app env)
-  idleTimeoutMs: number // 5 * 60_000
-  blurGraceMs: number // 60_000
-  heartbeatIntervalMs: number // 30_000
+  idleTimeoutMs: number // TIME_TRACKER_IDLE_MS ?? 5 * 60_000 (dev override for E2E smoke)
+  blurGraceMs: number // TIME_TRACKER_BLUR_GRACE_MS ?? 60_000
+  heartbeatIntervalMs: number // TIME_TRACKER_HEARTBEAT_MS ?? 30_000
   activityThrottleMs: number // 5_000 (renderer-side)
 }
 ```
@@ -76,12 +76,13 @@ export interface TimeTrackerConfig {
   export function createTrackerClient(baseUrl?: string): TrackerClient
 
   export interface TrackerClient {
-    sendEvent(event: TrackerEvent, ctx: ProjectContext): Promise<void> // never rejects
-    sendHeartbeat(workspacePath?: string): Promise<void> // never rejects
+    /** Resolves true iff the service acknowledged (2xx). Never rejects. */
+    sendEvent(event: TrackerEvent, ctx: ProjectContext): Promise<boolean>
+    sendHeartbeat(workspacePath?: string): Promise<boolean> // never rejects
     isHealthy(): Promise<boolean> // GET /health, 2s timeout, never rejects
   }
   ```
-- **Do:** `fetch` with `AbortSignal.timeout(3000)`; body per contract: `{ event, workspacePath: ctx.projectRootPath, projectRootPath, worktreePath, workspaceName, branch, timestamp: new Date().toISOString() }`. Every promise caught — a down service is a silent no-op.
+- **Do:** `fetch` with `AbortSignal.timeout(3000)`; body per contract: `{ event, workspacePath: ctx.projectRootPath, projectRootPath, worktreePath, workspaceName, branch, timestamp: new Date().toISOString() }`. Every promise caught — a down service is a silent no-op that resolves `false`. The boolean lets the tracker know whether a block-opening event was actually delivered (service-recovery re-emit).
 - **Integrates with:** nothing — pure leaf module.
 - **Verify:** `pnpm typecheck`; unit tests green.
 - **Tests:** Yes — payload shape; never-rejects on fetch rejection (do NOT assert real timeout duration — `AbortSignal.timeout` uses real timers; mock fetch rejection instead).
@@ -111,8 +112,9 @@ export interface TimeTrackerConfig {
     appFocus(): void // any Orca window gained OS focus
     appBlur(): void // all Orca windows lost OS focus
     suspend(): void // powerMonitor 'suspend' — force-close all open blocks
-    resume(): void // powerMonitor 'resume' — re-health-check
-    flush(): void // before-quit / window closed — deterministic blur of open blocks
+    resume(): void // powerMonitor 'resume' — re-health-check + re-emit focus for unconfirmed entries
+    senderClosed(senderId: number): void // BrowserWindow 'closed' — blur + drop that sender's state
+    flush(): void // before-quit — deterministic blur of ALL open blocks
     dispose(): void
   }
 
@@ -122,7 +124,8 @@ export interface TimeTrackerConfig {
     now?: () => number // injectable clock
   ): TimeTracker
   ```
-- **Do:** state keyed by `senderId` (`webContents.id` — the ONE identifier used end-to-end): `{ ctx, lastActivityAt, idle: boolean }`.
+- **Do:** state keyed by `senderId` (`webContents.id` — the ONE identifier used end-to-end): `{ ctx, lastActivityAt, idle: boolean, delivered: boolean }`.
+  - **Delivery tracking (service recovery):** `delivered` records whether the block-opening event (`focus`/`active`) got a `true` from the client. If `false` (service was down), the next `activity()` — and `resume()` after a successful health re-check — re-sends `focus` instead of assuming the block is open. This is what makes "service comes back ⇒ tracking resumes" real instead of accidental.
   - `activity()`: project changed (compare by `projectRootPath`, NOT `worktreePath`) → `blur(old)` + `focus(new)`; same project, different worktree → update ctx only (no churn); idle → `active`; first ping → `focus`. Always updates `lastActivityAt`.
   - Idle: one `setInterval(~30s)` — entries older than `idleTimeoutMs` and not yet idle → `idle(ctx)` once.
   - `appBlur()`: start `blurGraceMs` timer → on expiry, `blur` all open entries (mark closed). `appFocus()` cancels the timer; if entries were closed by grace/idle, next `activity()` reopens (`focus`/`active`).
@@ -135,15 +138,33 @@ export interface TimeTrackerConfig {
 - **Tests:** Yes — full matrix below.
 - **Depends on:** Task 1, Task 2
 
-### Task 4: Wiring — IPC, window signals, powerMonitor, lifecycle
+### Task 4: Context resolution in main (Store-backed)
+- **Files:** `src/main/time-tracker/context.ts` (create)
+- **Produces:**
+  ```typescript
+  /** Resolves an ActivityPing against the Store. Returns null (no tracking) when:
+   *  repo/worktree unknown, or repo is remote (Repo.connectionId != null). */
+  export function buildCtx(
+    ping: ActivityPing,
+    lookup: { getRepoById(id: string): Repo | undefined; getWorktreeById(id: string): { path: string; branch?: string } | undefined }
+  ): ProjectContext | null
+  ```
+- **Do:** main is the source of truth — never trust renderer paths/flags. Resolve `Repo` and `Worktree` from the Store by ID; drop the ping if either is missing or `repo.connectionId != null` (SSH/remote). `projectRootPath = repo.path`, `worktreePath = worktree.path`, `branch = worktree.branch ?? ''`, `workspaceName = path.basename(repo.path)` (Node path, OS-aware). `lookup` is injected so tests need no real Store.
+- **Integrates with:** Orca `Store` (`src/main/persistence`); Task 3 consumes the result.
+- **Verify:** unit tests green.
+- **Tests:** Yes — remote drop, unknown IDs, basename derivation (in `context.test.ts` — explicit ownership; no untested glue).
+- **Depends on:** Task 3
+
+### Task 5: Wiring — IPC, window signals, powerMonitor, lifecycle
 - **Files:** `src/main/time-tracker/wire.ts` (create), `src/main/index.ts` (modify ~3 lines), `src/preload/index.ts` (modify), `src/preload/api-types.ts` (modify)
 - **Produces:**
   ```typescript
   // src/main/time-tracker/wire.ts — self-contained: avoids threading the tracker
   // through registerCoreHandlers' once-guarded 17-param signature.
-  export function wireTimeTracker(): TimeTracker
-  // - ipcMain.on('timeTracker:activity', (e, ping: ActivityPing) => { if (ping.remote) return;
-  //     tracker.activity(e.sender.id, buildCtx(ping)) })  // buildCtx: basename via node:path
+  export function wireTimeTracker(store: Store): TimeTracker
+  // - ipcMain.on('timeTracker:activity', (e, ping: ActivityPing) => {
+  //     const ctx = buildCtx(ping, storeLookup); if (ctx) tracker.activity(e.sender.id, ctx) })
+  // - app.on('browser-window-created', (_e, w) => w.on('closed', () => tracker.senderClosed(wcId)))
   // - app.on('browser-window-focus' → appFocus, 'browser-window-blur' → appBlur*)
   //   *appBlur only when BrowserWindow.getFocusedWindow() === null (app-level blur)
   // - powerMonitor.on('suspend' → suspend, 'resume' → resume)
@@ -153,13 +174,13 @@ export interface TimeTrackerConfig {
   // preload (api-types.ts):
   timeTracker: { reportActivity(ping: ActivityPing): void } // ipcRenderer.send
   ```
-- **Do:** one `wireTimeTracker()` call added to `src/main/index.ts` after app ready — deliberately OUTSIDE `registerCoreHandlers` (once-guarded, 17 params; adding a dependency there maximizes upstream-merge conflicts). `ipcMain.on` (no response needed; deviation from the `handle` pattern is intentional and documented in the module header). Preload exposes the single `send` wrapper; respect AGENTS.md preload type-declaration conventions.
-- **Integrates with:** Task 3; Electron `app`/`powerMonitor`; preload contextBridge.
-- **Verify:** `pnpm typecheck`; dev run — activity reaches main (temporary debug log, removed before merge).
-- **Tests:** No (thin glue — `buildCtx` extracted into `tracker.ts` or `types.ts` and unit-tested there: basename derivation, remote drop).
-- **Depends on:** Task 3
+- **Do:** one `wireTimeTracker(store)` call added to `src/main/index.ts` after app ready — deliberately OUTSIDE `registerCoreHandlers` (once-guarded, 17 params; adding a dependency there maximizes upstream-merge conflicts). Window close is wired explicitly: `before-quit` is app-quit lifecycle ONLY — per-window `closed` (captured webContents id at creation; the id is unavailable after destroy) calls `senderClosed`, which blurs and stops heartbeats for that sender. `ipcMain.on` (no response needed; deviation from the `handle` pattern is intentional and documented in the module header). Preload exposes the single `send` wrapper; respect AGENTS.md preload type-declaration conventions.
+- **Integrates with:** Tasks 3–4; Electron `app`/`powerMonitor`; preload contextBridge.
+- **Verify:** `pnpm typecheck`; dev run — activity reaches main (temporary debug log, removed before merge); closing the window blurs the block immediately.
+- **Tests:** No (thin glue — all logic lives in tested modules: `tracker.ts`, `context.ts`).
+- **Depends on:** Task 4
 
-### Task 5: Renderer activity hook
+### Task 6: Renderer activity hook
 - **Files:** `src/renderer/src/hooks/useTimeTrackerActivity.ts` (create), `src/renderer/src/App.tsx` (modify — one hook call)
 - **Produces:**
   ```typescript
@@ -167,25 +188,25 @@ export interface TimeTrackerConfig {
   /** Pure, exported for tests */
   export function shouldReport(lastSentAt: number, now: number, throttleMs: number): boolean
   ```
-- **Do:** `window.addEventListener` for `keydown`, `pointerdown`, `wheel` (passive, capture), throttled to 1 ping / 5s via refs (zero re-renders). On report, read store refs: active worktree (`useActiveWorktree`, `src/renderer/src/store/selectors.ts:191`) and its repo (`useRepoById`, `:178`); send `ActivityPing { repoPath: repo.path, remote: repo.connectionId != null, worktreePath: worktree.path, branch: worktree.branch ?? '' }`. No active worktree (home/settings) ⇒ no ping. NO path math in the renderer (no basename — main owns it).
-- **Integrates with:** Task 4 preload API; store selectors.
+- **Do:** `window.addEventListener` for `keydown`, `pointerdown`, `wheel` (passive, capture), throttled to 1 ping / 5s via refs (zero re-renders). On report, read store refs: active worktree (`useActiveWorktree`, `src/renderer/src/store/selectors.ts:191`); send `ActivityPing { repoId: worktree.repoId, worktreeId: worktree.id }` — IDs only; main resolves and validates everything. No active worktree (home/settings) ⇒ no ping.
+- **Integrates with:** Task 5 preload API; store selectors.
 - **Verify:** dev run — typing in agents-mode chat opens a human block (`curl localhost:47321/projects`).
-- **Tests:** Yes — `shouldReport` throttle cases; ping-builder returns null without active worktree and flags `remote` correctly.
-- **Depends on:** Task 4
-
-### Task 6: E2E smoke verification (manual, scripted steps)
-- **Files:** `docs-fork/time-tracking.md` (create — includes the verification script)
-- **Do:** document and execute: 1) service stopped → open Orca → no errors; auto-spawn works (or silently doesn't, if no entrypoint); 2) type in agents mode → block opens for the repo; 3) switch worktree (same repo) → no churn; switch repo → blur+focus; 4) idle (lower `idleTimeoutMs` via dev env) → block closes; resume reopens; 5) kill service mid-session → Orca unaffected; 6) sleep the laptop 2 min → block closed at suspend, not inflated; 7) quit Orca → block closed immediately.
-- **Verify:** all seven checks pass on the local build (`pnpm run build:mac` per FORK-NOTES).
-- **Tests:** No (manual smoke; state machine unit-tested in Task 3).
+- **Tests:** Yes — `shouldReport` throttle cases; ping builder returns null without active worktree.
 - **Depends on:** Task 5
 
-### Task 7: Agent documentation
+### Task 7: E2E smoke verification (manual, scripted steps)
+- **Files:** `docs-fork/time-tracking.md` (create — includes the verification script)
+- **Do:** document and execute: 1) service stopped → open Orca → no errors; auto-spawn works (or silently doesn't, if no entrypoint); 2) type in agents mode → block opens for the repo; 3) switch worktree (same repo) → no churn; switch repo → blur+focus; 4) idle (lower via `TIME_TRACKER_IDLE_MS` dev env) → block closes; resume reopens; 5) kill service mid-session → Orca unaffected; keep typing; restart service → next activity re-sends focus (delivery tracking) and a block reopens; 6) sleep the laptop 2 min → block closed at suspend, not inflated; 7) close the window / quit Orca → block closed immediately.
+- **Verify:** all seven checks pass on the local build (`pnpm run build:mac` per FORK-NOTES).
+- **Tests:** No (manual smoke; state machine unit-tested in Task 3).
+- **Depends on:** Task 6
+
+### Task 8: Agent documentation
 - **Files:** `docs-fork/time-tracking.md` (extend), and in the tracker repo: `.claude/rules/agent-integrations.md` (modify), `AGENTS.md` (modify)
-- **Do:** Orca side — module layout, contract, config envs (`TIME_TRACKER_BASE_URL`, `TIME_TRACKER_SERVICE_PATH`; note both are dev/shell-launch only — a GUI-launched packaged `.app` won't see shell exports), SSH-skip decision, rebase-survival map (all code in `src/main/time-tracker/` + 4 touch points: `index.ts` ~3 lines, preload ×2, App.tsx 1 line). Tracker repo — add a "Human reporters" note: `/events/*` now has two clients (VS Code extension, Orca fork) and where the Orca half lives. Separate commits per repo (different blast radius).
+- **Do:** Orca side — module layout, contract, config envs (`TIME_TRACKER_BASE_URL`, `TIME_TRACKER_SERVICE_PATH`, plus dev-only timing overrides `TIME_TRACKER_IDLE_MS` / `TIME_TRACKER_BLUR_GRACE_MS` / `TIME_TRACKER_HEARTBEAT_MS`; note all are dev/shell-launch only — a GUI-launched packaged `.app` won't see shell exports), SSH-skip decision, rebase-survival map (all code in `src/main/time-tracker/` + 4 touch points: `index.ts` ~3 lines, preload ×2, App.tsx 1 line). Tracker repo — add a "Human reporters" note: `/events/*` now has two clients (VS Code extension, Orca fork) and where the Orca half lives. Separate commits per repo (different blast radius).
 - **Verify:** a cold agent reading only docs can locate both halves.
 - **Tests:** No
-- **Depends on:** Task 6
+- **Depends on:** Task 7
 
 ## Test Matrix
 
@@ -207,8 +228,10 @@ export interface TimeTrackerConfig {
 | Suspend force-closes / resume re-checks | `tracker.test.ts` | suspend → blur immediate; resume → health |
 | Quit flushes | `tracker.test.ts` | flush → blur all open |
 | Heartbeat renews ALL open projects | `tracker.test.ts` | 2 projects ⇒ 2 heartbeats/tick |
-| SSH repos not tracked | `tracker.test.ts` (buildCtx) + hook test | remote ping dropped / flagged |
-| Service down = no-op | `client.test.ts` | never rejects on fetch rejection |
+| SSH repos not tracked | `context.test.ts` | remote repo ⇒ buildCtx null |
+| Service down = no-op | `client.test.ts` | never rejects on fetch rejection (resolves false) |
+| Service recovery resumes tracking | `tracker.test.ts` | delivery re-emit (#14, #15) |
+| Window close deterministic | `tracker.test.ts` | senderClosed (#16) |
 
 ### Per-Task Test Cases
 
@@ -241,16 +264,25 @@ export interface TimeTrackerConfig {
 | 11 | flush | A,B open | flush() | blur(A), blur(B) |
 | 12 | heartbeat all | A,B open | +30s tick | heartbeat(rootA) + heartbeat(rootB) |
 | 13 | heartbeat skip | nothing open | +30s tick | no heartbeat |
-| 14 | buildCtx remote | ping.remote=true | buildCtx/handler | dropped |
-| 15 | buildCtx name | /x/y/repo | buildCtx | workspaceName='repo' |
+| 14 | delivery re-emit | focus returned false (service down) | next activity | focus re-sent (not assumed open) |
+| 15 | resume re-emit | unconfirmed entry + resume() | health ok | focus re-sent |
+| 16 | senderClosed | ctxA open on s1 | senderClosed(s1) | blur(A), state dropped, heartbeats stop |
 
-#### Task 5: hook helpers — `useTimeTrackerActivity.test.ts` (Unit)
+#### Task 4: context — `context.test.ts` (Unit)
+| # | Case | Given | When | Then |
+|---|------|-------|------|------|
+| 1 | remote drop | repo.connectionId='ssh-1' | buildCtx | null |
+| 2 | unknown IDs | repo/worktree missing in lookup | buildCtx | null |
+| 3 | basename | repo.path=/x/y/repo | buildCtx | workspaceName='repo' |
+| 4 | branch fallback | worktree.branch undefined | buildCtx | branch='' |
+
+#### Task 6: hook helpers — `useTimeTrackerActivity.test.ts` (Unit)
 | # | Case | Given | When | Then |
 |---|------|-------|------|------|
 | 1 | throttle hold | lastSent 1s ago | shouldReport | false |
 | 2 | throttle expiry | lastSent 6s ago | shouldReport | true |
 | 3 | no worktree | no active worktree | ping builder | null |
-| 4 | remote flag | repo.connectionId set | ping builder | remote: true |
+| 4 | IDs only | active worktree | ping builder | { repoId, worktreeId } — no paths |
 
 ### E2E Flows
 1. Agents mode: type a prompt → repo gets an open human block → idle → closed with duration.
@@ -287,3 +319,13 @@ Adversarial review (Plan agent) incorporated:
 - **[SUGGESTION] basename in renderer**: context building moved to main (Node `path`, cross-platform); renderer sends raw `ActivityPing`.
 - **[SUGGESTION] fake-timer timeout test**: replaced with fetch-rejection test.
 - **[SUGGESTION] packaged-app env**: documented limitation; settings UI deferred.
+
+Cross-model review (plan-reviewer, GPT via OpenCode) incorporated:
+- **[CRITICAL] service recovery**: `sendEvent` now returns delivery `boolean`; tracker tracks `delivered` per entry and re-emits `focus` on next activity / after `resume()` health recovery (tests #14–15).
+- **[CRITICAL] window close**: `senderClosed(senderId)` wired via per-window `closed` (Task 5); `before-quit` is app-quit only (test #16).
+- **[WARNING] renderer trust**: `ActivityPing` is IDs-only (`repoId`, `worktreeId`); main resolves Repo/Worktree from the Store and owns the remote-skip (new Task 4 `context.ts` + tests).
+- **[WARNING] env overrides**: dev-only `TIME_TRACKER_IDLE_MS` / `BLUR_GRACE_MS` / `HEARTBEAT_MS` added to config + docs; E2E step now uses them.
+- **[WARNING] artifact contract**: `Upstream: none` annotated as an intentional, documented exception (spec skipped by explicit user decision).
+- **[WARNING] buildCtx ownership**: explicit module `context.ts` with its own test file — no untested glue.
+
+- 2026-06-04 · plan-reviewer · round 1 · REVISE · incorporate-and-stop · .claude/reviews/orca-time-tracking-r1.md
