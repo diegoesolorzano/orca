@@ -2444,6 +2444,10 @@ export type PreloadApi = {
     onStopped: (callback: (data: SpeechLifecycleEvent) => void) => () => void
     onError: (callback: (data: SpeechErrorEvent) => void) => () => void
   }
+  timeTracker: {
+    /** Fire-and-forget activity ping (fork feature: human time tracking). */
+    reportActivity: (ping: { repoId: string; worktreeId: string }) => void
+  }
 }
 
 declare global {
