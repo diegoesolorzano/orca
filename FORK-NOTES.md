@@ -1,0 +1,98 @@
+# Notas del fork — diegoesolorzano/orca
+
+Fork personal de [stablyai/orca](https://github.com/stablyai/orca) con el fix de git-crypt,
+compilado y en uso local mientras el PR upstream se mergea.
+
+> Este archivo vive SOLO en la rama `personal/build`. Nunca debe llegar a una rama de PR.
+
+## Por que existe este fork
+
+`git worktree add` falla en repos con git-crypt: las keys viven en el git dir del repo
+principal (`.git/git-crypt/`), pero el worktree nuevo tiene su propio git dir sin keys,
+y el smudge filter aborta durante el checkout del add. Orca creaba worktrees con
+`git worktree add` directo, asi que en repos encriptados (ej. nodo-ia, multi-key
+`default` + `agente`) la creacion nunca completaba. Un setup script post-create no
+puede arreglarlo porque el fallo ocurre ANTES de que corra.
+
+## El fix
+
+`src/main/git/worktree.ts` — espejo del patron ya existente en `addSparseWorktree`:
+
+1. Detecta `git-crypt/` en el git dir del repo (probe de filesystem, layouts normal y bare)
+2. Si existe → `git worktree add --no-checkout`
+3. Copia `.git/git-crypt/` completo (todas las keys) al git dir del worktree
+4. `git checkout <branch>` en el worktree
+5. Si el checkout diferido falla → rollback (worktree remove + branch -D)
+
+Tests: `src/main/git/worktree-git-crypt.test.ts` (6 casos).
+Limitacion conocida: solo path local; el relay SSH (`src/relay/git-handler-worktree-ops.ts`)
+quedo sin cambios porque solo dispone de un ejecutor `git` (sin file ops remotas).
+
+## Estado upstream
+
+- Issue original: stablyai/orca#4566 (de otro usuario, mismo problema)
+- Nuestro PR: **stablyai/orca#4626** (`Fixes #4566`)
+- Cuando el PR se mergee y salga release: volver al Orca oficial y abandonar este build.
+
+## Ramas
+
+| Rama | Proposito | Regla |
+|------|-----------|-------|
+| `fix/git-crypt-worktree-create` | Rama del PR upstream | NO tocar salvo feedback de maintainers; sin archivos personales |
+| `personal/build` | Build local (fix + estas notas + futuros parches propios) | Aqui se compila; aqui se integran updates de upstream |
+| `main` | Espejo de upstream/main | Solo fast-forward desde upstream |
+
+Remotes: `origin` = diegoesolorzano/orca · `upstream` = stablyai/orca
+
+## Build e instalacion (macOS arm64)
+
+```bash
+pnpm install
+pnpm run build:mac           # genera dist/mac-arm64/Orca.app
+# swap:
+osascript -e 'quit app "Orca"' ; sleep 2
+rm -rf /Applications/Orca.app   # (el build anterior del fork; el oficial 1.4.30 esta respaldado)
+cp -R dist/mac-arm64/Orca.app /Applications/Orca.app
+xattr -dr com.apple.quarantine /Applications/Orca.app
+open -a Orca
+```
+
+- Backup del oficial 1.4.30: `dist/Orca-1.4.30-official-backup.app`
+- Los datos de Orca (repos, worktrees, settings, accounts) viven en
+  `~/Library/Application Support/orca/` y `~/.orca/` — sobreviven cualquier swap del .app.
+
+## Consideraciones del build propio
+
+- **Sin auto-updates**: el build del fork no recibe actualizaciones; hay que actualizar
+  manualmente (ver flujo abajo).
+- **Sin firma/notarizacion de Stably**: primera apertura puede requerir aprobacion en
+  Ajustes → Privacidad y Seguridad (por eso el `xattr -dr com.apple.quarantine`).
+- **Version**: el build hereda la version del package.json upstream al momento del merge
+  (ej. 1.4.45) — no confundir con releases oficiales de la misma version.
+- **Setup script por repo** (Settings → Repository): para nodo-ia basta `pnpm install`;
+  el fix ya copia las keys durante la creacion del worktree.
+- **Borrar worktrees desde Orca NO re-homea transcripts de Claude** — si el worktree tuvo
+  sesiones de Claude que valgan, usar el skill `worktree-remove` en su lugar.
+- **Verificacion pendiente menor**: leer un archivo de la key `default` (ej. `secrets/`)
+  en un worktree real creado por Orca (la key `agente` ya se verifico empiricamente).
+
+## Flujo de actualizacion sin romper el build
+
+```bash
+git checkout main
+git fetch upstream
+git merge --ff-only upstream/main      # espejo limpio
+git checkout personal/build
+git merge main                          # integra upstream al build personal
+pnpm install                            # deps pueden haber cambiado
+pnpm run build:mac
+# swap del .app (ver arriba)
+```
+
+- Conflicto probable: `src/main/git/worktree.ts` si upstream toca esa zona.
+  - Si el conflicto es porque **mergearon nuestro PR**: resolver quedandose con la
+    version de upstream (el fix ya viene incluido) y borrar el duplicado local.
+    A partir de ahi este fork sobra → volver al Orca oficial.
+  - Si es otro cambio: resolver conservando el fix (defer checkout + copia de keys).
+- Nunca rebasear `fix/git-crypt-worktree-create` despues de abierto el PR salvo
+  que los maintainers lo pidan.
