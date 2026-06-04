@@ -40,6 +40,7 @@ describe('createTrackerClient', () => {
     expect(body.worktreePath).toBe('/repos/nodo-ia')
     expect(body.workspaceName).toBe('nodo-ia')
     expect(body.branch).toBe('main')
+    expect(body.sourceName).toBe('orca')
     // ISO 8601 UTC timestamp
     expect(body.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
   })

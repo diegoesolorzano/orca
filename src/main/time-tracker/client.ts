@@ -39,6 +39,9 @@ export function createTrackerClient(
           worktreePath: ctx.worktreePath,
           workspaceName: ctx.workspaceName,
           branch: ctx.branch,
+          // Reporting client — the Timeline badge distinguishes Orca from
+          // VS Code human sessions.
+          sourceName: 'orca',
           timestamp: new Date().toISOString()
         },
         EVENT_TIMEOUT_MS
