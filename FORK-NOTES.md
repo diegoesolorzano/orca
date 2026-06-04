@@ -1,9 +1,19 @@
 # Notas del fork — diegoesolorzano/orca
 
-Fork personal de [stablyai/orca](https://github.com/stablyai/orca) con el fix de git-crypt,
-compilado y en uso local mientras el PR upstream se mergea.
+Fork **permanente** de [stablyai/orca](https://github.com/stablyai/orca): base para desarrollo
+de producto propio encima de Orca (licencia MIT, atribucion requerida). No es un fork temporal —
+sobrevive al merge del PR #4626.
 
 > Este archivo vive SOLO en la rama `personal/build`. Nunca debe llegar a una rama de PR.
+
+## Estrategia de fork de producto
+
+- **Upstream-first:** todo parche que upstream pueda aceptar (fixes, mejoras genericas) va por
+  PR upstream — cada merge alla es mantenimiento que nos quitamos. El fork guarda SOLO la
+  diferenciacion de producto que upstream no aceptaria.
+- **Parches pequenos y modulares:** cada feature propia en su rama `feat/*`, mergeada a
+  `personal/build`. Minimiza superficie de conflicto en cada sync con upstream.
+- **Docs de producto:** en `docs-fork/` (separado de `docs/` upstream para evitar conflictos).
 
 ## Por que existe este fork
 
@@ -91,8 +101,11 @@ pnpm run build:mac
 
 - Conflicto probable: `src/main/git/worktree.ts` si upstream toca esa zona.
   - Si el conflicto es porque **mergearon nuestro PR**: resolver quedandose con la
-    version de upstream (el fix ya viene incluido) y borrar el duplicado local.
-    A partir de ahi este fork sobra → volver al Orca oficial.
+    version de upstream (el fix ya viene incluido). El fork sigue vivo — solo se
+    simplifica: un parche menos que cargar en los merges.
   - Si es otro cambio: resolver conservando el fix (defer checkout + copia de keys).
 - Nunca rebasear `fix/git-crypt-worktree-create` despues de abierto el PR salvo
   que los maintainers lo pidan.
+- El backup `dist/Orca-1.4.30-official-backup.app` y la nota de "volver al oficial"
+  aplicaban a la etapa de fork temporal; con el fork como base de producto, el build
+  propio es el permanente.

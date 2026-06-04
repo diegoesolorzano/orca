@@ -1,7 +1,10 @@
 # Fork Workflow (diegoesolorzano/orca)
 
-Este es un FORK personal de stablyai/orca, no un proyecto propio. Antes de cualquier
-cambio aqui, leer `FORK-NOTES.md` (rama `personal/build`) — es la fuente de verdad.
+Fork **permanente** de stablyai/orca — base para desarrollo de producto propio. Antes de
+cualquier cambio aqui, leer `FORK-NOTES.md` (rama `personal/build`) — es la fuente de verdad.
+
+**Upstream-first:** cualquier fix o mejora generica que upstream pueda aceptar va por PR
+upstream (rama desde `main`). El fork guarda solo la diferenciacion de producto.
 
 ## Rama de trabajo
 
@@ -22,4 +25,6 @@ archivos personales (FORK-NOTES.md, esta regla) y desde donde se compila el buil
 - NUNCA dejar que FORK-NOTES.md o `.claude/` lleguen a una rama de PR upstream.
 - Updates de upstream y recompilacion: usar el skill global `orca-fork-update`.
 - Antes de compilar tras un merge: correr `npx vitest run --config config/vitest.config.ts src/main/git/`.
-- Si el PR #4626 ya se mergeo upstream: este fork es obsoleto — volver al Orca oficial.
+- Si el PR #4626 ya se mergeo upstream: resolver el merge quedandose con upstream — el fork
+  sigue vivo (es base de producto), solo carga un parche menos.
+- Docs de producto del fork: en `docs-fork/` (NUNCA en `docs/`, que es de upstream).
