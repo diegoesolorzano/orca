@@ -78,8 +78,11 @@ export async function detectUntrackedNestedRepos(
   deps?: NestedRepoDetectionDeps  // seam de test; default = produccion
 ): Promise<NestedRepoWarning | null>
 ```
-Mocks: runner git (`vi.mock('./runner')`); `vi.mock('../wsl')` solo en el caso 12;
-scan inyectado via `deps` en los unit (candidatos SIEMPRE absolutos).
+Mocks: runner git (`vi.mock('./runner')`); **`vi.mock('../wsl')` a NIVEL TOP del
+archivo** (vitest hoisting — un mock por-caso no intercepta un modulo ya
+importado): default `parseWslPath: () => null` (comportamiento no-WSL para todos
+los casos) y override del mock SOLO dentro del caso 12; scan inyectado via `deps`
+en los unit (candidatos SIEMPRE absolutos).
 
 #### Cases
 
@@ -89,6 +92,7 @@ scan inyectado via `deps` en los unit (candidatos SIEMPRE absolutos).
 | 2 | gitlink staged excluido | candidato `<tl>/sub`; ls-files -z → modo 160000 `sub` | detect | `null` | unit |
 | 3 | mezcla gitlink + no trackeado | `sub` (160000) y `frontend` | detect | solo `frontend/` | unit |
 | 3b | **argv canonico de ls-files** | candidatos absolutos `<tl>/backend`, `<tl>/frontend` | detect | el mock del runner recibio `['ls-files','-z','--stage','--','backend','frontend']` — pathspecs RELATIVOS canonicos, jamas absolutos (guardia directa del bug absoluto-vs-relativo; el output-only no atrapa un compare por basename) | unit |
+| 3c | **conteo de subprocesos** | 12 candidatos | detect | exactamente UNA llamada `ls-files` + UNA `git config --file` (+ el `rev-parse` inicial) sin importar el numero de candidatos — contrato de perf FR-5 "sin subprocesos git por directorio" | unit |
 | 4 | .gitmodules-only excluido | ls-files vacio; `git config --file .gitmodules --get-regexp` → `submodule.sub2.path sub2` | detect | `null` | unit |
 | 4b | forma de .gitmodules vs canonica | `.gitmodules` declara `sub2/` (trailing slash) o `sub2\x` estilo Windows | detect | la exclusion normaliza la forma del config a la canonica antes de comparar (pin del contrato de matching) | unit |
 | 5 | .gitmodules ausente | mock `git config --file` lanza (exit non-zero) | detect | candidatos NO excluidos; pipeline sigue | unit |
@@ -98,6 +102,7 @@ scan inyectado via `deps` en los unit (candidatos SIEMPRE absolutos).
 | 8 | rev-parse lanza | mock toplevel rechaza | detect | `null` (nunca rechaza) | unit |
 | 9 | ls-files lanza | mock ls-files rechaza | detect | `null` | unit |
 | 10 | scan lanza | scan inyectado rechaza | detect | `null` | unit |
+| 10b | scan con timeout parcial | scan resuelve `{ timedOut: true, repos: [2 candidatos] }` | detect | `null` — el AC de timeout exige NO warning; una implementacion que avise desde resultados parciales debe fallar este test | unit |
 | 11 | separadores Windows | toplevel `C:\repo`, candidato `C:\repo\packages\api` (strings, helper puro — corre en cualquier OS) | detect | pathspec `packages/api`; display `packages/api/` | unit |
 | 12 | WSL UNC | `vi.mock('../wsl')`: `parseWslPath` → `{distro}` non-null, `toWindowsWslPath` spy; rev-parse → `/home/u/repo` | detect | el path que llega al scan es el traducido por `toWindowsWslPath` | unit |
 | 13 | opciones acotadas | spy sobre el scan inyectado | detect | `{ maxDepth: 3, maxRepos: 100, timeoutMs: 5000 }` + filesystem con `isSelectedPathGitRepo()` → false y `readTextFile()` → '' | unit |
@@ -132,7 +137,7 @@ intercepta y los casos fallan en seco (señal clara, no silenciosa).
 | 2 | absent | detector mock → `null` | create local | `'nestedRepos' in result === false` | integration |
 | 3 | concurrencia | detector mock con `invocationCallOrder` | create local | detector invocado ANTES que `addWorktreeMock`/`addSparseWorktreeMock` | integration |
 | 4 | detector rechaza | detector mock rejects | create local | create resuelve normal sin campo | integration |
-| 4b | **rechazo + throw temprano** | detector mock rejects Y el create falla antes del await (ej. `addWorktreeMock` lanza) | create local | el create lanza SU error y NO hay unhandled rejection (`process.on('unhandledRejection')` listener en el test) — unico caso que distingue `.catch` en el launch site vs en el await | integration |
+| 4b | **rechazo + throw temprano** | detector mock rejects Y el create falla antes del await (ej. `addWorktreeMock` lanza) | create local | el create lanza SU error y NO hay unhandled rejection — mecanica concreta: registrar listener `process.on('unhandledRejection')` con teardown garantizado (`onTestFinished`/`finally` que hace `removeListener`), y tras el rechazo del create **drenar al menos un macrotick** (`await new Promise(setImmediate)`) antes de assertar que el listener no disparo; sin el drain el caso es no-falsificable | integration |
 | 5 | remote NO invoca | repo con `connectionId` (via `createRemoteWorktree`) | create | detector NO invocado — el riesgo real de mis-wiring (ambos paths viven en `worktree-remote.ts`); folder-mode se descarta como caso: bypassa `createLocalWorktree` estructuralmente y seria trivialmente verde | integration |
 
 ---
@@ -152,6 +157,7 @@ assert `toast.warning`.
 | 1 | toast con paths | create resuelve `nestedRepos: { paths: ['backend/','frontend/'], truncated: false, moreCount: 0 }` | createWorktree | `toast.warning('Workspace created without nested repos', ...)`; description contiene `backend/, frontend/` y 'only contains files tracked by the parent repo' | unit |
 | 2 | truncated | `truncated: true, moreCount: 2` | createWorktree | description contiene 'and 2 more' | unit |
 | 3 | sin campo | create resuelve sin `nestedRepos` | createWorktree | `toast.warning` NO llamado con ese titulo | unit |
+| 4 | warnings combinados | create resuelve `localBaseRefRefresh` (skipped) Y `nestedRepos` a la vez | createWorktree | AMBOS toasts disparan — ninguno suprime/sobrescribe al otro | unit |
 
 ## E2E Flows
 
@@ -198,3 +204,19 @@ Revision adversarial (subagente Plan, 2026-06-04) — cambios incorporados:
   archivos corregida (incluye el slice del renderer, que faltaba).
 
 - 2026-06-04 · Plan subagent (adversarial) · round 1 · REQUEST_CHANGES → incorporado
+
+Review cross-model (test-reviewer/GPT via OpenCode, round 1, REQUEST_CHANGES) —
+cambios incorporados:
+- **[CRITICAL] timeout parcial sin test**: caso 10b — scan resuelve `{ timedOut:
+  true, repos: [...] }` → `null` (una implementacion que avise desde resultados
+  parciales falla).
+- **[W] hoisting del mock wsl**: `vi.mock('../wsl')` a nivel top con default
+  no-WSL, override solo en el caso 12.
+- **[W] conteo de subprocesos**: caso 3c — exactamente una `ls-files` + una
+  `git config --file` sin importar candidatos (contrato FR-5).
+- **[W] mecanica del unhandled-rejection**: caso 4b con teardown garantizado +
+  drain de un macrotick.
+- **[I] toasts combinados**: caso 4 del renderer — `localBaseRefRefresh` +
+  `nestedRepos` simultaneos, ambos disparan.
+
+- 2026-06-04 · test-reviewer · round 1 · REQUEST_CHANGES · incorporate-and-stop · `.claude/reviews/orca-4671-nested-repo-warning-tests-r1.md`
