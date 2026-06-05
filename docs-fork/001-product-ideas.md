@@ -47,6 +47,18 @@ en sesion 2026-06-05, sin resolver):
 
 **Base tecnica lista**: el detector (`detectUntrackedNestedRepos`), el tipo
 `NestedRepoWarning` y el toast de la parte 1 son los insumos directos.
+
+## 003 — Rebrand "Chiwi" (white-label del fork)
+
+**Fecha:** 2026-06-05 · **Estado:** diferido por el usuario.
+
+- **Nivel 1 (trivial):** commit en `personal/build`: `productName` → "Chiwi" en
+  `package.json`/config de electron-builder + iconos (`.icns`/`.png`). El .app,
+  Dock, menu y About muestran Chiwi. Pendiente del usuario: el icono. Conflictos
+  de merge con upstream: triviales (2-3 archivos).
+- **Nivel 2 (proyecto aparte):** strings de UI, bundle ID `com.stablyai.orca`
+  (cambiarlo SEPARA los datos de app en `~/Library/Application Support/`), CLI
+  `orca`, rutas `~/.orca/`, deep links. Es el rebrand de producto completo.
 **Origen:** lavasport-app (meta-repo: root orquestador + `frontend/` y `backend/` como
 repos git independientes anidados). Mismo patron que cubren los skills globales
 `worktree-add` 1.3.0 / `worktree-remove` 0.2.0.
