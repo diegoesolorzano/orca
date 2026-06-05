@@ -110,10 +110,17 @@ export type NestedRepoWarning = {
   import type { NestedRepoWarning } from '../../shared/types'
   /** Never throws and never rejects; resolves null when there is nothing to warn about. */
   export async function detectUntrackedNestedRepos(
-    repoPath: string
+    repoPath: string,
+    deps?: NestedRepoDetectionDeps // seam de test (scan inyectable); default = produccion
   ): Promise<NestedRepoWarning | null>
   export const NESTED_REPO_DISPLAY_CAP = 10
   ```
+  **Amendments del test-plan review:** (a) parametro opcional `deps` — sin seam,
+  los unit tests no son cableables (la funcion construye su filesystem
+  internamente); (b) la relativizacion del paso 3 usa un helper PURO de strings
+  (strip del prefijo toplevel + normalizacion de ambos separadores `\`/`/`) en vez
+  de `path.relative` — `path.relative` POSIX no trata `\` como separador, lo que
+  haria el comportamiento Windows intesteable y fragil.
 - **Do:** Pipeline (envuelto entero en try/catch → null):
   1. **Toplevel:** `gitExecFileAsync(['rev-parse', '--show-toplevel'], { cwd:
      repoPath })` — ancla de TODA relativizacion (no asumir `repoPath === toplevel`).
@@ -233,8 +240,10 @@ export type NestedRepoWarning = {
   comentario.
 - **Integrates with:** `CreateWorktreeResult.nestedRepos` (Task 1).
 - **Verify:** test del slice + verificacion manual (Deploy Checklist del spec).
-- **Tests:** Yes — test del slice (patron de tests existentes del store): dispara
-  toast con paths; truncated agrega "and 2 more"; `undefined` no dispara.
+- **Tests:** Yes — en el `src/renderer/src/store/slices/worktrees.test.ts`
+  EXISTENTE, via store action (`window.api.worktrees.create` mockeado →
+  `createWorktree` → assert `toast.warning`; template en l.1280-1316). La funcion
+  es privada del slice — NO se exporta ni se crea archivo de test nuevo.
 - **Depends on:** Task 1 (paralelizable con 2-6)
 
 ### Task 8: Verificacion completa y PR upstream
