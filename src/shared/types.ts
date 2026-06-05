@@ -400,6 +400,18 @@ export type WorktreeLineageWarning = {
   details?: Record<string, unknown>
 }
 
+// Why: a worktree of a meta-repo (parent repo containing independent nested git
+// repos) materializes none of the nested repos' files; this warns the user
+// post-create instead of leaving them in a silently incomplete tree.
+export type NestedRepoWarning = {
+  /** Repo-relative paths, '/'-normalized, trailing '/'; capped at 10 shown. */
+  paths: string[]
+  /** True when more nested repos exist beyond the displayed cap. */
+  truncated: boolean
+  /** Count of additional repos beyond `paths` (0 when not truncated). */
+  moreCount: number
+}
+
 // ─── Diff line comments ──────────────────────────────────────────────
 // Why: users leave review notes on specific lines of the modified side of
 // a diff so they can be handed back to an AI agent (pasted into a terminal
@@ -647,6 +659,8 @@ export type TerminalLayoutSnapshot = {
   ptyIdsByLeafId?: Record<string, string>
   /** Serialized terminal buffers per leaf for scrollback restoration on restart. */
   buffersByLeafId?: Record<string, string>
+  /** Durable scrollback snapshot refs per leaf; raw bytes live outside session JSON. */
+  scrollbackRefsByLeafId?: Record<string, string>
   /** User-assigned pane titles, keyed by stable layout leaf UUID.
    *  Persisted alongside buffers via the existing session:set flow. */
   titlesByLeafId?: Record<string, string>
@@ -682,6 +696,8 @@ export type WorkspaceSessionState = {
   openFilesByWorktree?: Record<string, PersistedOpenFile[]>
   /** Per-worktree active editor file ID (filePath) at shutdown. */
   activeFileIdByWorktree?: Record<string, string | null>
+  /** Per-file markdown preview front-matter visibility. Absent entry means hidden. */
+  markdownFrontmatterVisible?: Record<string, boolean>
   /** Persisted browser workspaces, keyed by worktree ID. */
   browserTabsByWorktree?: Record<string, BrowserWorkspace[]>
   /** Persisted browser pages, keyed by workspace ID. */
@@ -1634,6 +1650,7 @@ export type CreateWorktreeResult = {
   warning?: string
   initialBaseStatus?: WorktreeBaseStatusEvent
   localBaseRefRefresh?: LocalBaseRefRefreshResult
+  nestedRepos?: NestedRepoWarning
   startupTerminal?: {
     spawned: boolean
     surface?: 'visible' | 'background'
@@ -2078,6 +2095,9 @@ export type GlobalSettings = {
    *  left sidebar free of its button entirely. Hiding the button here also
    *  removes it from keyboard navigation. */
   showTasksButton: boolean
+  /** Why: Automations can be restored from Settings or the View menu, so this
+   *  only controls whether the top-level sidebar shortcut is shown. */
+  showAutomationsButton?: boolean
   /** Why: Orca Mobile remains reachable from the toolbox; this only controls
    *  whether the top-level sidebar shortcut is shown. */
   showMobileButton?: boolean

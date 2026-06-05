@@ -337,6 +337,7 @@ export default function TerminalPane({
   const paneTitlesRef = useRef<Record<number, string>>({})
   paneTitlesRef.current = paneTitles
   const removedTitleLeafIdsRef = useRef<Set<string>>(new Set())
+  const clearedScrollbackLeafIdsRef = useRef<Set<string>>(new Set())
   const [renamingPaneId, setRenamingPaneId] = useState<number | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const renameInputRef = useRef<HTMLInputElement>(null)
@@ -513,16 +514,28 @@ export default function TerminalPane({
     const existing = useAppStore.getState().terminalLayoutsByTabId[tabId]
     const currentPanes = manager.getPanes()
     const currentLeafIds = new Set(currentPanes.map((p) => p.leafId))
+    const clearedScrollbackLeafIds = clearedScrollbackLeafIdsRef.current
+    const scrollbackPreserveLeafIds = new Set(
+      [...currentLeafIds].filter((leafId) => !clearedScrollbackLeafIds.has(leafId))
+    )
     // Preserve existing buffersByLeafId so layout-only persists (resize, split,
     // reorder) don't clobber previously captured scrollback. Drop entries for
     // leaves that no longer exist.
     const mergedBuffers = mergeCapturedLeafState({
       prior: existing?.buffersByLeafId,
       fresh: {},
-      currentLeafIds
+      currentLeafIds: scrollbackPreserveLeafIds
     })
     if (Object.keys(mergedBuffers).length > 0) {
       layout.buffersByLeafId = mergedBuffers
+    }
+    const mergedScrollbackRefs = mergeCapturedLeafState({
+      prior: existing?.scrollbackRefsByLeafId,
+      fresh: {},
+      currentLeafIds: scrollbackPreserveLeafIds
+    })
+    if (Object.keys(mergedScrollbackRefs).length > 0) {
+      layout.scrollbackRefsByLeafId = mergedScrollbackRefs
     }
     // Why: between pane creation and the deferred rAF where PTYs actually
     // attach, all transports have getPtyId() === null. The merge below
@@ -570,7 +583,19 @@ export default function TerminalPane({
       layout.titlesByLeafId = titlesByLeafId
     }
     setTabLayout(tabId, layout)
+    for (const leafId of currentLeafIds) {
+      clearedScrollbackLeafIds.delete(leafId)
+    }
   }, [tabId, setTabLayout])
+
+  const clearPaneScrollback = useCallback(
+    (pane: ManagedPane): void => {
+      clearedScrollbackLeafIdsRef.current.add(pane.leafId)
+      pane.terminal.clear()
+      persistLayoutSnapshot()
+    },
+    [persistLayoutSnapshot]
+  )
 
   useEffect(() => {
     if (!terminalTab) {
@@ -1058,6 +1083,7 @@ export default function TerminalPane({
     setSearchOpen,
     onSearchSelectedText: handleSearchSelectedText,
     onRequestClosePane: handleRequestClosePane,
+    onClearPaneScrollback: clearPaneScrollback,
     searchOpenRef,
     searchStateRef,
     macOptionAsAltRef,
@@ -1381,9 +1407,13 @@ export default function TerminalPane({
         existingLayout: existing,
         // Why: beforeunload skips local/floating bytes because session payloads
         // immediately prune them; worktree sleep keeps them as defense-in-depth.
-        captureBuffers: shouldCaptureScrollbackBuffers
+        captureBuffers: shouldCaptureScrollbackBuffers,
+        clearedScrollbackLeafIds: clearedScrollbackLeafIdsRef.current
       })
       setTabLayout(tabId, layout)
+      for (const pane of panes) {
+        clearedScrollbackLeafIdsRef.current.delete(pane.leafId)
+      }
     }
     shutdownBufferCaptures.set(tabId, captureBuffers)
     return () => {
@@ -1582,6 +1612,7 @@ export default function TerminalPane({
     fallbackCwd: cwd ?? '',
     toggleExpandPane,
     onRequestClosePane: handleRequestClosePane,
+    onClearPaneScrollback: clearPaneScrollback,
     onSetTitle: handleStartRename,
     onPasteError: setTerminalError,
     onAgentSessionForkReady: setAgentSessionFork,
@@ -1678,6 +1709,9 @@ export default function TerminalPane({
     // users still see its output while typing elsewhere. Hiding on `isActive`
     // blanked the previously focused pane and exposed the white group body.
     display: isVisible || shouldMeasureHiddenStartup ? 'flex' : 'none',
+    // Why: split divider lines intentionally overdraw inside the pane tree.
+    // `hidden` reliably clips that pseudo-element paint at the terminal body.
+    overflow: 'hidden',
     ...(shouldMeasureHiddenStartup ? { opacity: 0, pointerEvents: 'none' } : {}),
     ['--orca-terminal-divider-color' as string]:
       effectiveAppearance?.dividerColor ?? DEFAULT_TERMINAL_DIVIDER_DARK,

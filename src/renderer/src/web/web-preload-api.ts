@@ -420,6 +420,12 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       pickFloatingMarkdownDocument: () => Promise.resolve(null),
       pickFloatingWorkspaceDirectory: () => Promise.resolve(null)
     },
+    platform: {
+      get: () => ({
+        platform: getBrowserPlatform(),
+        osRelease: ''
+      })
+    },
     e2e: {
       getConfig: () => createE2EConfig({})
     },
@@ -485,6 +491,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
           })
         )
       },
+      readTerminalScrollback: () => null,
       setSync: (session) => {
         writeJson(SESSION_STORAGE_KEY, sanitizeWebRuntimeWorkspaceSession(session))
       }
@@ -1819,6 +1826,7 @@ function createWebUiApi(): NonNullable<Partial<PreloadApi>['ui']> {
     onFocusBrowserAddressBar: () => noopUnsubscribe,
     onFindInBrowserPage: () => noopUnsubscribe,
     onReloadBrowserPage: () => noopUnsubscribe,
+    onZoomBrowserPage: () => noopUnsubscribe,
     onHardReloadBrowserPage: () => noopUnsubscribe,
     onCloseActiveTab: () => noopUnsubscribe,
     onSwitchTab: () => noopUnsubscribe,

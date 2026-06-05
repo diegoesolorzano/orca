@@ -423,6 +423,14 @@ const api = {
       ipcRenderer.invoke('app:pickFloatingWorkspaceDirectory')
   },
 
+  platform: {
+    get: () => ({
+      platform: process.platform,
+      osRelease:
+        (process as NodeJS.Process & { getSystemVersion?: () => string }).getSystemVersion?.() ?? ''
+    })
+  } satisfies PreloadApi['platform'],
+
   wsl: {
     isAvailable: (): Promise<boolean> => ipcRenderer.invoke('wsl:isAvailable'),
     listDistros: (): Promise<string[]> => ipcRenderer.invoke('wsl:listDistros')
@@ -2075,6 +2083,8 @@ const api = {
     get: () => ipcRenderer.invoke('session:get'),
     set: (args) => ipcRenderer.invoke('session:set', args),
     patch: (args) => ipcRenderer.invoke('session:patch', args),
+    readTerminalScrollback: (args) =>
+      ipcRenderer.sendSync('session:read-terminal-scrollback-sync', args),
     /** Synchronous session save for beforeunload — blocks until flushed to disk. */
     setSync: (args) => {
       ipcRenderer.sendSync('session:set-sync', args)
@@ -2597,6 +2607,12 @@ const api = {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
       ipcRenderer.on('ui:reloadBrowserPage', listener)
       return () => ipcRenderer.removeListener('ui:reloadBrowserPage', listener)
+    },
+    onZoomBrowserPage: (callback: (direction: 'in' | 'out' | 'reset') => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, direction: 'in' | 'out' | 'reset') =>
+        callback(direction)
+      ipcRenderer.on('ui:zoomBrowserPage', listener)
+      return () => ipcRenderer.removeListener('ui:zoomBrowserPage', listener)
     },
     onHardReloadBrowserPage: (callback: () => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent) => callback()

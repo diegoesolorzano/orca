@@ -678,6 +678,12 @@ export type AppApi = {
 
 export type PreloadApi = {
   app: AppApi
+  platform: {
+    get: () => {
+      platform: NodeJS.Platform
+      osRelease: string
+    }
+  }
   e2e: {
     getConfig: () => E2EConfig
   }
@@ -1710,6 +1716,7 @@ export type PreloadApi = {
     get: () => Promise<WorkspaceSessionState>
     set: (args: WorkspaceSessionState) => Promise<void>
     patch: (args: WorkspaceSessionPatch) => Promise<void>
+    readTerminalScrollback: (args: { ref: string }) => string | null
     setSync: (args: WorkspaceSessionState) => void
   }
   remoteWorkspace: {
@@ -2071,6 +2078,7 @@ export type PreloadApi = {
     onFocusBrowserAddressBar: (callback: () => void) => () => void
     onFindInBrowserPage: (callback: () => void) => () => void
     onReloadBrowserPage: (callback: () => void) => () => void
+    onZoomBrowserPage: (callback: (direction: 'in' | 'out' | 'reset') => void) => () => void
     onHardReloadBrowserPage: (callback: () => void) => () => void
     onCloseActiveTab: (callback: () => void) => () => void
     onSwitchTab: (callback: (direction: 1 | -1) => void) => () => void

@@ -24,8 +24,13 @@ import type {
   WorkspaceSessionState
 } from '../shared/types'
 import { isTerminalLeafId, makePaneKey } from '../shared/stable-pane-id'
+import { TERMINAL_SCROLLBACK_REPLAY_BYTE_LIMIT } from '../shared/terminal-scrollback-limits'
 import { MAX_BROWSER_HISTORY_ENTRIES } from '../shared/workspace-session-browser-history'
-import { ONBOARDING_FINAL_STEP, ONBOARDING_FLOW_VERSION } from '../shared/constants'
+import {
+  getDefaultWorkspaceSession,
+  ONBOARDING_FINAL_STEP,
+  ONBOARDING_FLOW_VERSION
+} from '../shared/constants'
 
 // Shared mutable state so the electron mock can reference a per-test directory
 const testState = { dir: '' }
@@ -266,8 +271,11 @@ describe('Store', () => {
     expect(settings.terminalUseSeparateLightTheme).toBe(true)
     expect(settings.rightSidebarOpenByDefault).toBe(true)
     expect(settings.showTasksButton).toBe(true)
+    expect(settings.showAutomationsButton).toBe(true)
     expect(settings.visibleTaskProviders).toEqual(['github', 'gitlab', 'linear', 'jira'])
-    expect(settings.openInApplications).toEqual([])
+    expect(settings.openInApplications).toEqual([
+      { id: 'vscode', label: 'VS Code', command: 'code' }
+    ])
     expect(settings.experimentalActivity).toBe(false)
     expect(settings.experimentalActivityDefaultedOffForAllUsers).toBe(true)
     expect(settings.experimentalTerminalAttention).toBe(false)
@@ -1143,6 +1151,7 @@ describe('Store', () => {
     expect(store.getSettings().sourceControlViewMode).toBe('list')
     expect(store.getSettings().showGitIgnoredFiles).toBe(true)
     expect(store.getSettings().showTasksButton).toBe(true)
+    expect(store.getSettings().showAutomationsButton).toBe(true)
     expect(store.getSettings().combinedDiffFileTreeVisibleByDefault).toBe(false)
     expect(store.getSettings().visibleTaskProviders).toEqual(['github', 'gitlab', 'linear', 'jira'])
     expect(store.getSettings().experimentalActivity).toBe(false)
@@ -2491,6 +2500,7 @@ describe('Store', () => {
       },
       terminalLayoutsByTabId: {},
       openFilesByWorktree: {},
+      markdownFrontmatterVisible: {},
       browserTabsByWorktree: {},
       browserPagesByWorkspace: {},
       activeBrowserTabIdByWorktree: {},
@@ -2524,7 +2534,10 @@ describe('Store', () => {
       worktreeMeta?: Record<string, unknown>
     }
     expect(persisted.settings?.sourceControlViewMode).toBe('tree')
-    expect(persisted.workspaceSession).toEqual(workspaceSession)
+    expect(persisted.workspaceSession).toEqual({
+      ...getDefaultWorkspaceSession(),
+      ...workspaceSession
+    })
     expect(persisted.worktreeMeta).toEqual({
       'repo1::/worktree-a': { status: 'active' },
       'repo1::/worktree-b': { status: 'active' }
@@ -3504,7 +3517,7 @@ describe('Store', () => {
     ).toBeUndefined()
   })
 
-  it('strips local terminal scrollback buffers when setting workspace session', async () => {
+  it('stores remote terminal scrollback out of workspace session JSON', async () => {
     const store = await createStore()
     store.addRepo(makeRepo({ id: 'local-repo', connectionId: null }))
     store.addRepo(makeRepo({ id: 'remote-repo', connectionId: 'ssh-target-1' }))
@@ -3516,9 +3529,12 @@ describe('Store', () => {
     expect(session.terminalLayoutsByTabId['local-tab'].ptyIdsByLeafId).toEqual({
       [TEST_LEAF_1]: 'local-pty'
     })
-    expect(session.terminalLayoutsByTabId['remote-tab'].buffersByLeafId).toEqual({
-      [TEST_LEAF_2]: 'remote-scrollback'
+    expect(session.terminalLayoutsByTabId['remote-tab'].buffersByLeafId).toBeUndefined()
+    expect(session.terminalLayoutsByTabId['remote-tab'].scrollbackRefsByLeafId).toEqual({
+      [TEST_LEAF_2]: expect.stringMatching(/^v1-[0-9a-f]{32}$/)
     })
+    const ref = session.terminalLayoutsByTabId['remote-tab'].scrollbackRefsByLeafId?.[TEST_LEAF_2]
+    expect(ref ? store.readTerminalScrollbackSnapshot(ref) : null).toBe('remote-scrollback')
   })
 
   it('caps oversized browser history when setting workspace session', async () => {
@@ -3535,7 +3551,7 @@ describe('Store', () => {
     expect(prunedBytes).toBeLessThan(oversizedBytes / 2)
   })
 
-  it('keeps terminal scrollback buffers when the repo catalog is not hydrated yet', async () => {
+  it('stores maybe-remote terminal scrollback out of workspace session JSON', async () => {
     const store = await createStore()
 
     store.setWorkspaceSession({
@@ -3563,9 +3579,65 @@ describe('Store', () => {
 
     expect(
       store.getWorkspaceSession().terminalLayoutsByTabId['remote-tab'].buffersByLeafId
+    ).toBeUndefined()
+    expect(
+      store.getWorkspaceSession().terminalLayoutsByTabId['remote-tab'].scrollbackRefsByLeafId
     ).toEqual({
-      [TEST_LEAF_2]: 'maybe-remote-scrollback'
+      [TEST_LEAF_2]: expect.stringMatching(/^v1-[0-9a-f]{32}$/)
     })
+    const ref =
+      store.getWorkspaceSession().terminalLayoutsByTabId['remote-tab'].scrollbackRefsByLeafId?.[
+        TEST_LEAF_2
+      ]
+    expect(ref ? store.readTerminalScrollbackSnapshot(ref) : null).toBe('maybe-remote-scrollback')
+  })
+
+  it('deletes terminal scrollback snapshot files when refs leave the workspace session', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo({ id: 'remote-repo', connectionId: 'ssh-target-1' }))
+    const session = makeSessionWithTerminalBuffers()
+    store.setWorkspaceSession({
+      ...session,
+      tabsByWorktree: { 'remote-repo::/remote': session.tabsByWorktree['remote-repo::/remote'] },
+      terminalLayoutsByTabId: { 'remote-tab': session.terminalLayoutsByTabId['remote-tab'] }
+    })
+    const ref =
+      store.getWorkspaceSession().terminalLayoutsByTabId['remote-tab'].scrollbackRefsByLeafId?.[
+        TEST_LEAF_2
+      ]
+    expect(ref).toEqual(expect.stringMatching(/^v1-[0-9a-f]{32}$/))
+    if (!ref) {
+      throw new Error('expected scrollback snapshot ref')
+    }
+    expect(existsSync(join(testState.dir, 'terminal-scrollback', `${ref}.bin`))).toBe(true)
+
+    store.setWorkspaceSession({
+      activeRepoId: null,
+      activeWorktreeId: null,
+      activeTabId: null,
+      tabsByWorktree: {},
+      terminalLayoutsByTabId: {}
+    })
+
+    expect(existsSync(join(testState.dir, 'terminal-scrollback', `${ref}.bin`))).toBe(false)
+  })
+
+  it('reads only the replay tail from oversized terminal scrollback snapshots', async () => {
+    const store = await createStore()
+    const ref = 'v1-00000000000000000000000000000000'
+    const snapshotDir = join(testState.dir, 'terminal-scrollback')
+    mkdirSync(snapshotDir, { recursive: true })
+    writeFileSync(
+      join(snapshotDir, `${ref}.bin`),
+      `stale-prefix-${'x'.repeat(TERMINAL_SCROLLBACK_REPLAY_BYTE_LIMIT)}tail`,
+      'utf-8'
+    )
+
+    const buffer = store.readTerminalScrollbackSnapshot(ref)
+
+    expect(buffer).toHaveLength(TERMINAL_SCROLLBACK_REPLAY_BYTE_LIMIT)
+    expect(buffer?.startsWith('stale-prefix')).toBe(false)
+    expect(buffer?.endsWith('tail')).toBe(true)
   })
 
   it('strips legacy local terminal scrollback buffers when loading workspace session', async () => {
@@ -3585,9 +3657,12 @@ describe('Store', () => {
     const store = await createStore()
     const session = store.getWorkspaceSession()
     expect(session.terminalLayoutsByTabId['local-tab'].buffersByLeafId).toBeUndefined()
-    expect(session.terminalLayoutsByTabId['remote-tab'].buffersByLeafId).toEqual({
-      [TEST_LEAF_2]: 'remote-scrollback'
+    expect(session.terminalLayoutsByTabId['remote-tab'].buffersByLeafId).toBeUndefined()
+    expect(session.terminalLayoutsByTabId['remote-tab'].scrollbackRefsByLeafId).toEqual({
+      [TEST_LEAF_2]: expect.stringMatching(/^v1-[0-9a-f]{32}$/)
     })
+    const ref = session.terminalLayoutsByTabId['remote-tab'].scrollbackRefsByLeafId?.[TEST_LEAF_2]
+    expect(ref ? store.readTerminalScrollbackSnapshot(ref) : null).toBe('remote-scrollback')
   })
 
   it('caps oversized legacy browser history when loading workspace session', async () => {
@@ -4646,7 +4721,12 @@ describe('Store', () => {
     expect(layout.activeLeafId).toBe(TEST_LEAF_1)
     expect(layout.expandedLeafId).toBeNull()
     expect(layout.ptyIdsByLeafId).toEqual({ [TEST_LEAF_1]: 'daemon-pty' })
-    expect(layout.buffersByLeafId).toEqual({ [TEST_LEAF_1]: 'Current buffer' })
+    expect(layout.buffersByLeafId).toBeUndefined()
+    expect(layout.scrollbackRefsByLeafId).toEqual({
+      [TEST_LEAF_1]: expect.stringMatching(/^v1-[0-9a-f]{32}$/)
+    })
+    const ref = layout.scrollbackRefsByLeafId?.[TEST_LEAF_1]
+    expect(ref ? store.readTerminalScrollbackSnapshot(ref) : null).toBe('Current buffer')
     expect(layout.titlesByLeafId).toEqual({ [TEST_LEAF_1]: 'Current' })
     expect(session.tabsByWorktree.wt1[0].ptyId).toBe('daemon-pty')
   })
@@ -5394,6 +5474,57 @@ describe('Store', () => {
     expect(session.terminalLayoutsByTabId.tab1.ptyIdsByLeafId).toEqual({})
   })
 
+  it('clears workspace bindings when marking all SSH remote PTY leases for a target terminated', async () => {
+    const store = await createStore()
+    store.upsertSshRemotePtyLease({
+      targetId: 'ssh-1',
+      ptyId: 'remote-pty',
+      worktreeId: 'wt1',
+      tabId: 'tab1',
+      leafId: TEST_LEAF_1,
+      state: 'attached'
+    })
+    store.setWorkspaceSession({
+      activeRepoId: 'r1',
+      activeWorktreeId: 'wt1',
+      activeTabId: 'tab1',
+      tabsByWorktree: {
+        wt1: [
+          {
+            id: 'tab1',
+            worktreeId: 'wt1',
+            title: 'Terminal',
+            customTitle: null,
+            color: null,
+            sortOrder: 0,
+            createdAt: 1,
+            ptyId: 'ssh:ssh-1@@remote-pty'
+          }
+        ]
+      },
+      terminalLayoutsByTabId: {
+        tab1: {
+          root: { type: 'leaf', leafId: TEST_LEAF_1 },
+          activeLeafId: TEST_LEAF_1,
+          expandedLeafId: null,
+          ptyIdsByLeafId: { [TEST_LEAF_1]: 'ssh:ssh-1@@remote-pty' }
+        }
+      }
+    })
+
+    store.markSshRemotePtyLeases('ssh-1', 'terminated')
+
+    const session = store.getWorkspaceSession()
+    expect(store.getSshRemotePtyLeases('ssh-1')).toEqual([
+      expect.objectContaining({
+        ptyId: 'remote-pty',
+        state: 'terminated'
+      })
+    ])
+    expect(session.tabsByWorktree.wt1[0].ptyId).toBeNull()
+    expect(session.terminalLayoutsByTabId.tab1.ptyIdsByLeafId).toEqual({})
+  })
+
   it('matches scoped SSH workspace bindings against raw relay leases', async () => {
     const store = await createStore()
     store.upsertSshRemotePtyLease({
@@ -5486,6 +5617,57 @@ describe('Store', () => {
         state: 'terminated'
       })
     ])
+  })
+
+  it('clears workspace bindings when marking an SSH remote PTY lease expired', async () => {
+    const store = await createStore()
+    store.upsertSshRemotePtyLease({
+      targetId: 'ssh-1',
+      ptyId: 'remote-pty',
+      worktreeId: 'wt1',
+      tabId: 'tab1',
+      leafId: TEST_LEAF_1,
+      state: 'attached'
+    })
+    store.setWorkspaceSession({
+      activeRepoId: 'r1',
+      activeWorktreeId: 'wt1',
+      activeTabId: 'tab1',
+      tabsByWorktree: {
+        wt1: [
+          {
+            id: 'tab1',
+            worktreeId: 'wt1',
+            title: 'Terminal',
+            customTitle: null,
+            color: null,
+            sortOrder: 0,
+            createdAt: 1,
+            ptyId: 'ssh:ssh-1@@remote-pty'
+          }
+        ]
+      },
+      terminalLayoutsByTabId: {
+        tab1: {
+          root: { type: 'leaf', leafId: TEST_LEAF_1 },
+          activeLeafId: TEST_LEAF_1,
+          expandedLeafId: null,
+          ptyIdsByLeafId: { [TEST_LEAF_1]: 'ssh:ssh-1@@remote-pty' }
+        }
+      }
+    })
+
+    store.markSshRemotePtyLease('ssh-1', 'ssh:ssh-1@@remote-pty', 'expired')
+
+    const session = store.getWorkspaceSession()
+    expect(store.getSshRemotePtyLeases('ssh-1')).toEqual([
+      expect.objectContaining({
+        ptyId: 'remote-pty',
+        state: 'expired'
+      })
+    ])
+    expect(session.tabsByWorktree.wt1[0].ptyId).toBeNull()
+    expect(session.terminalLayoutsByTabId.tab1.ptyIdsByLeafId).toEqual({})
   })
 
   it('removes SSH remote PTY leases when callers pass scoped app ids', async () => {
