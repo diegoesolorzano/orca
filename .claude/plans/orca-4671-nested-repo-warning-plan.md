@@ -117,24 +117,36 @@ export type NestedRepoWarning = {
 - **Do:** Pipeline (envuelto entero en try/catch → null):
   1. **Toplevel:** `gitExecFileAsync(['rev-parse', '--show-toplevel'], { cwd:
      repoPath })` — ancla de TODA relativizacion (no asumir `repoPath === toplevel`).
+     **WSL (Windows):** el runner es WSL-aware para ejecutar, pero NO traduce stdout
+     arbitrario de vuelta a UNC (`runner.ts:498-506`); si `parseWslPath(repoPath)`
+     (de `src/main/wsl.ts:18`) es non-null, convertir el toplevel Linux con
+     `toWindowsWslPath(toplevel, distro)` (`wsl.ts:63`) ANTES de usarlo en
+     `scanNestedRepos`/fs — sin esto, el scan fs fallaria silenciosamente en repos
+     WSL UNC.
   2. **Scan:** `scanNestedRepos({ path: toplevel, options: { maxDepth: 3, maxRepos:
      100, timeoutMs: 5000 }, filesystem: { ...createLocalNestedRepoScanFilesystem(),
      isSelectedPathGitRepo: () => false, readTextFile: async () => '' } })` —
      el `readTextFile` vacio neutraliza el pruning por `.gitignore` (gotcha 3);
      `maxRepos: 100` (default del scanner) para poder computar el remainder real.
-  3. **Relativizar:** cada `candidate.path` (ABSOLUTO, gotcha 2) →
-     `relative(toplevel, candidate.path)` (`path` nativo del OS), descartar el caso
-     borde `''`/fuera del toplevel.
-  4. **Filtro submodules:** (a) UNA llamada `gitExecFileAsync(['ls-files',
-     '--stage', '--', ...relPaths], { cwd: toplevel })`; parsear lineas `<mode>
-     <oid> <stage>\t<path>`; armar `Set` de paths con modo `160000`. (b) Leer
-     `<toplevel>/.gitmodules` directo del fs (si existe) y extraer los `path = ...`
-     (cubre submodules declarados aun no staged — spec FR-1). Descartar candidatos
-     presentes en (a) o (b). La comparacion se hace en forma relativa SIN
-     normalizar separadores aun en Windows: convertir el rel-path nativo a `/` para
-     comparar contra la salida de git (que siempre usa `/`).
-  5. **Normalizar display:** separadores a `/` + trailing `/`; ordenar
-     alfabeticamente (orden estable para tests y UX).
+  3. **Relativizar + canonicalizar (UNA sola lista):** cada `candidate.path`
+     (ABSOLUTO, gotcha 2) → `relative(toplevel, candidate.path)` (`path` nativo del
+     OS) → convertir separadores a `/` INMEDIATAMENTE. Esa lista canonica
+     slash-relativa es la UNICA forma usada de aqui en adelante: argv de
+     `ls-files`, keys del Set de gitlinks, comparacion `.gitmodules`, orden y
+     display (en Windows, pasar `packages\api` como pathspec a git seria fragil).
+     Descartar el caso borde `''`/fuera del toplevel.
+  4. **Filtro submodules:** (a) UNA llamada `gitExecFileAsync(['ls-files', '-z',
+     '--stage', '--', ...canonicalPaths], { cwd: toplevel })`; parsear registros
+     NUL-terminados `<mode> <oid> <stage>\t<path>` (sin `-z`, `core.quotePath`
+     cita paths con caracteres raros y rompe el parser line-based); armar `Set` de
+     paths con modo `160000`. (b) Submodules declarados aun no staged (spec FR-1):
+     `gitExecFileAsync(['config', '--file', '.gitmodules', '--get-regexp',
+     '^submodule\\..*\\.path$'], { cwd: toplevel })` — parser git-config real, no
+     regex casero sobre el archivo (sintaxis con comentarios/quoting); exit code
+     non-zero cuando el archivo no existe → tratar como vacio. Descartar candidatos
+     presentes en (a) o (b).
+  5. **Display:** trailing `/` sobre la forma canonica; ordenar alfabeticamente
+     (orden estable para tests y UX).
   6. **Cap:** si quedan > 10 → `paths` = primeros 10, `truncated: true`,
      `moreCount` = total − 10 (si el scan mismo reporto `truncated` a 100,
      `moreCount` es un piso — aceptable). Si 0 → null.
@@ -152,16 +164,19 @@ export type NestedRepoWarning = {
   con codigo roto en produccion.
 - **Do:** Casos: (a) dos anidados no trackeados → `{ paths:
   ['backend/','frontend/'], truncated: false, moreCount: 0 }`; (b) candidato con
-  modo 160000 en ls-files → excluido; solo gitlinks → null; (b2) candidato declarado
-  solo en `.gitmodules` (no staged) → excluido; (c) sin anidados → null; (d) 12
-  anidados → 10 paths, truncated:true, moreCount:2; (e) `gitExecFileAsync` lanza →
-  null; (f) scan lanza → null; (g) candidatos con separadores Windows (`\\`) →
-  matching contra ls-files (que usa `/`) funciona y display sale con `/` + trailing
-  `/`; (h) spy de opciones del scanner: depth=3, maxRepos=100, timeout=5000, y el
-  filesystem inyectado neutraliza `readTextFile` e `isSelectedPathGitRepo`; (i)
-  candidato gitignoreado (el filesystem real lo podaria via ignore rules) →
-  presente, porque `readTextFile` devuelve '' (probar que la opcion inyectada es la
-  que llega al scanner).
+  modo 160000 en ls-files (salida `-z` NUL-terminada) → excluido; solo gitlinks →
+  null; (b2) candidato declarado solo en `.gitmodules` (mock de `git config --file
+  .gitmodules`) → excluido; `.gitmodules` ausente (exit non-zero) → no excluye
+  nada; (c) sin anidados → null; (d) 12 anidados → 10 paths, truncated:true,
+  moreCount:2; (e) `gitExecFileAsync` lanza → null; (f) scan lanza → null; (g)
+  candidatos con separadores Windows (`\\`) → pathspecs de ls-files y matching en
+  forma canonica `/`, display con `/` + trailing `/`; (g2) repo WSL UNC
+  (`parseWslPath` non-null) → el toplevel se traduce con `toWindowsWslPath` antes
+  del scan; (h) spy de opciones del scanner: depth=3, maxRepos=100, timeout=5000, y
+  el filesystem inyectado neutraliza `readTextFile` e `isSelectedPathGitRepo`; (i)
+  **integracion con el scanner REAL** (no mockeado) sobre filesystem fake/temp-dir:
+  un anidado gitignoreado por el padre ES encontrado gracias al override de
+  `readTextFile` (prueba el pruning real, no solo que la opcion se pasa).
 - **Verify:** `npx vitest run --config config/vitest.config.ts
   src/main/git/nested-repo-warning.test.ts` verde.
 - **Tests:** —
@@ -193,9 +208,10 @@ export type NestedRepoWarning = {
   que cubre `createLocalWorktree`)
 - **Do:** Mockear `detectUntrackedNestedRepos` (vi.mock del modulo Task 3): (a)
   devuelve warning → el resultado del create lo incluye; (b) devuelve null → campo
-  ausente; (c) concurrencia: el mock registra timestamp/orden y se asserta que fue
-  invocado antes de que el mock de `gitExecFileAsync` reciba `['worktree','add',...]`
-  (seam: orden de llamadas entre ambos mocks).
+  ausente; (c) concurrencia: ese archivo mockea `../git/worktree`
+  (`worktrees.test.ts:99-107`), asi que el seam correcto es el orden entre el mock
+  de `detectUntrackedNestedRepos` y `addWorktreeMock`/`addSparseWorktreeMock` (NO
+  `gitExecFileAsync(['worktree','add',...])`, que nunca se invoca alli).
 - **Verify:** suite verde.
 - **Tests:** —
 - **Depends on:** Task 5
@@ -221,30 +237,41 @@ export type NestedRepoWarning = {
   toast con paths; truncated agrega "and 2 more"; `undefined` no dispara.
 - **Depends on:** Task 1 (paralelizable con 2-6)
 
-### Task 8: Agent docs + estado del backlog
-- **Files:** `docs-fork/001-product-ideas.md` (modify)
-- **Do:** Marcar la parte 1 de la idea §002 como "en PR upstream" con link al PR;
-  la parte 2 queda pendiente. (AGENTS.md/rules del repo: N/A para upstream — ya
-  evaluado en el spec.)
-- **Verify:** doc actualizado, commit en `personal/build`.
-- **Tests:** No.
-- **Depends on:** Task 9 (numero de PR)
-
-### Task 9: Rama, verificacion completa y PR upstream
-- **Files:** — (git)
+### Task 8: Verificacion completa y PR upstream
+- **Files:** — (git, rama `feat/nested-repo-warning`)
 - **Do:** Los Tasks 1-7 se implementan en `feat/nested-repo-warning` creada desde
   `main` actualizado (`git fetch upstream && git checkout -b feat/nested-repo-warning
   upstream/main`). Commits atomicos sin referencias AI, con el refactor del scanner
   (Task 2) en commit propio. Al cerrar: suites de `src/main/git/`,
   `src/main/project-groups/`, `src/main/ipc/worktrees.test.ts`, slice renderer +
   `pnpm typecheck` + lint en archivos tocados; push a origin; `gh pr create --repo
-  stablyai/orca` referenciando #4671 (handle X @diegoesolorzano como en PR #4626);
-  merge de la rama a `personal/build`; rebuild local (skill `orca-fork-update` o
-  `pnpm run build:mac`).
-- **Verify:** PR abierto; build local con el feature; toast visible creando un
-  worktree de un meta-repo real; repo con submodules NO avisa.
+  stablyai/orca` referenciando #4671 (handle X @diegoesolorzano como en PR #4626).
+  Esta rama NUNCA recibe archivos personales (`docs-fork/`, `.claude/`) — regla
+  fork-workflow.
+- **Verify:** PR abierto y suites verdes.
 - **Tests:** —
 - **Depends on:** Tasks 1-7
+
+### Task 9: Docs del fork + estado del backlog (en `personal/build`)
+- **Files:** `docs-fork/001-product-ideas.md` (modify)
+- **Do:** En `personal/build`: marcar la parte 1 de la idea §002 como "en PR
+  upstream" con link al PR recien abierto; la parte 2 queda pendiente.
+  (AGENTS.md/rules del repo: N/A para upstream — ya evaluado en el spec.)
+- **Verify:** doc actualizado, commit en `personal/build`.
+- **Tests:** No.
+- **Depends on:** Task 8 (numero de PR)
+
+### Task 10: Merge a `personal/build` + rebuild local
+- **Files:** — (git)
+- **Do:** `git checkout personal/build && git merge feat/nested-repo-warning`;
+  correr `npx vitest run --config config/vitest.config.ts src/main/git/` (regla
+  fork-workflow pre-build); rebuild local (skill `orca-fork-update` o `pnpm run
+  build:mac`) y swap del .app.
+- **Verify:** build local con el feature; toast visible creando un worktree de un
+  meta-repo real (lavasport-app o WP-Maintain con repo anidado de prueba); repo con
+  submodules NO avisa.
+- **Tests:** —
+- **Depends on:** Task 8 (la rama lista); Task 9 puede ir antes o despues
 
 ## Test Matrix
 
@@ -350,3 +377,23 @@ Revision adversarial (subagente Plan, 2026-06-04) — cambios incorporados:
 - Verificado por el reviewer: trailing slash en pathspecs de gitlinks NO es
   problema (git 2.50); call-site del toast compartido es inocuo (campo solo lo
   adjunta el path local).
+
+Review cross-model (plan-reviewer/GPT via OpenCode, round 1, REQUEST_CHANGES) —
+cambios incorporados:
+- **[CRITICAL] WSL**: `rev-parse --show-toplevel` en repos WSL UNC devuelve path
+  Linux que el fs de Windows no puede leer → Task 3 traduce con
+  `parseWslPath`/`toWindowsWslPath` (`src/main/wsl.ts`) + test (g2).
+- **[W] Forma canonica unica**: relativizar y pasar a `/` INMEDIATAMENTE; la lista
+  canonica alimenta pathspecs, Set de gitlinks, `.gitmodules`, orden y display.
+- **[W] `ls-files -z`**: parser NUL-terminado (sin `-z`, `core.quotePath` cita
+  paths raros y rompe el line-based).
+- **[W] `.gitmodules` via `git config --file`**: parser real de git-config en vez
+  de regex casero.
+- **[W] Seam del test IPC corregido**: `worktrees.test.ts` mockea `../git/worktree`
+  → asserts contra `addWorktreeMock`, no contra `gitExecFileAsync`.
+- **[W] Tasks 8/9/10 reordenadas**: PR upstream / docs del fork (personal/build) /
+  merge+rebuild separados — los docs personales nunca tocan la rama del PR.
+- **[I] Test de integracion (i)** con el scanner real para el override de
+  `.gitignore`.
+
+- 2026-06-04 · plan-reviewer · round 1 · REQUEST_CHANGES · incorporate-and-stop · `.claude/reviews/orca-4671-nested-repo-warning-plan-r1.md`
