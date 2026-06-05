@@ -25,6 +25,11 @@ manual) que contiene N proyectos git, cada uno con sus worktrees. Equivalente al
 ## 002 — Worktrees conscientes de meta-repos (repos anidados)
 
 **Fecha:** 2026-06-04
+**Estado parte 1 (deteccion + warning):** IMPLEMENTADA — PR upstream
+[stablyai/orca#4677](https://github.com/stablyai/orca/pull/4677) (issue #4671),
+rama `feat/nested-repo-warning`, mergeada a `personal/build`. Artefactos:
+`docs-fork/specs/orca-4671-nested-repo-warning.md` + `.claude/plans/`.
+**Estado parte 2 (worktrees companion):** pendiente en este backlog.
 **Origen:** lavasport-app (meta-repo: root orquestador + `frontend/` y `backend/` como
 repos git independientes anidados). Mismo patron que cubren los skills globales
 `worktree-add` 1.3.0 / `worktree-remove` 0.2.0.
