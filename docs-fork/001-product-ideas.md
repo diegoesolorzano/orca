@@ -29,7 +29,24 @@ manual) que contiene N proyectos git, cada uno con sus worktrees. Equivalente al
 [stablyai/orca#4677](https://github.com/stablyai/orca/pull/4677) (issue #4671),
 rama `feat/nested-repo-warning`, mergeada a `personal/build`. Artefactos:
 `docs-fork/specs/orca-4671-nested-repo-warning.md` + `.claude/plans/`.
-**Estado parte 2 (worktrees companion):** pendiente en este backlog.
+**Estado parte 2 (worktrees companion):** pendiente — ESTA es la feature que el
+usuario realmente quiere (la parte 1 solo avisa). Probable diferenciacion del fork
+(opinable para upstream, salvo que reaccionen al PR #4677 pidiendo mas).
+
+**Decisiones de diseño abiertas para el `/feature-spec` de la parte 2** (planteadas
+en sesion 2026-06-05, sin resolver):
+1. **Ramas**: al worktrear el padre con rama `feat/x`, ¿que rama se crea en cada
+   repo anidado? ¿La misma `feat/x`? ¿Desde que base de cada anidado?
+2. **Montaje**: worktree del anidado en su ruta relativa DENTRO del worktree padre
+   (`<wt>/frontend`) — el directorio puede existir vacio o estar gitignoreado.
+3. **Remocion ordenada**: anidados primero, sin destruir trabajo sin commit
+   (modelo manual ya en el skill global `worktree-remove` 0.2.0).
+4. **Fallo a mitad**: anidado 2 de 3 falla → ¿rollback total o estado parcial?
+5. **UX**: ¿automatico, opt-in en el composer, o boton "Create companion
+   worktrees" en el toast de la parte 1?
+
+**Base tecnica lista**: el detector (`detectUntrackedNestedRepos`), el tipo
+`NestedRepoWarning` y el toast de la parte 1 son los insumos directos.
 **Origen:** lavasport-app (meta-repo: root orquestador + `frontend/` y `backend/` como
 repos git independientes anidados). Mismo patron que cubren los skills globales
 `worktree-add` 1.3.0 / `worktree-remove` 0.2.0.
