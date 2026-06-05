@@ -3526,6 +3526,14 @@ const api = {
       ipcRenderer.on('speech:error', listener)
       return () => ipcRenderer.removeListener('speech:error', listener)
     }
+  },
+
+  timeTracker: {
+    /** Fire-and-forget activity ping (fork feature: human time tracking).
+     *  IDs only — main resolves paths from the Store and never trusts these. */
+    reportActivity: (ping: { repoId: string; worktreeId: string }): void => {
+      ipcRenderer.send('timeTracker:activity', ping)
+    }
   }
 }
 
