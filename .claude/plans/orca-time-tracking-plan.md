@@ -5,7 +5,7 @@
 **Issue:** none
 **Upstream:** none <!-- intentional exception: spec skipped by explicit user decision (requirements settled in-session); plan is the root artifact -->
 **Date:** 2026-06-04
-**Status:** Planned
+**Status:** Shipped
 
 ## Overview
 
