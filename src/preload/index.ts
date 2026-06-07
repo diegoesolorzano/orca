@@ -683,6 +683,9 @@ const api = {
     ackColdRestore: (id: string): void => {
       ipcRenderer.send('pty:ackColdRestore', { id })
     },
+    ackData: (id: string, charCount: number): void => {
+      ipcRenderer.send('pty:ackData', { id, charCount })
+    },
 
     kill: (id: string, opts?: { keepHistory?: boolean }): Promise<void> =>
       ipcRenderer.invoke('pty:kill', { id, keepHistory: opts?.keepHistory ?? false }),
@@ -693,8 +696,14 @@ const api = {
     getMainBufferSnapshot: (
       id: string,
       opts?: { scrollbackRows?: number }
-    ): Promise<{ data: string; cols: number; rows: number; seq?: number } | null> =>
-      ipcRenderer.invoke('pty:getMainBufferSnapshot', { id, opts }),
+    ): Promise<{
+      data: string
+      cols: number
+      rows: number
+      cwd?: string | null
+      seq?: number
+      source?: 'headless' | 'renderer'
+    } | null> => ipcRenderer.invoke('pty:getMainBufferSnapshot', { id, opts }),
 
     /** Check if a PTY's shell has child processes (e.g. a running command).
      *  Returns false for an idle shell prompt. */
@@ -2847,11 +2856,21 @@ const api = {
       return () => ipcRenderer.removeListener('ui:moveSessionTab', listener)
     },
     onOpenFileFromMobile: (
-      callback: (data: { worktreeId: string; filePath: string; relativePath: string }) => void
+      callback: (data: {
+        worktreeId: string
+        filePath: string
+        relativePath: string
+        runtimeEnvironmentId?: string
+      }) => void
     ): (() => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
-        data: { worktreeId: string; filePath: string; relativePath: string }
+        data: {
+          worktreeId: string
+          filePath: string
+          relativePath: string
+          runtimeEnvironmentId?: string
+        }
       ) => callback(data)
       ipcRenderer.on('ui:openFileFromMobile', listener)
       return () => ipcRenderer.removeListener('ui:openFileFromMobile', listener)
@@ -2862,11 +2881,18 @@ const api = {
         filePath: string
         relativePath: string
         staged: boolean
+        runtimeEnvironmentId?: string
       }) => void
     ): (() => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
-        data: { worktreeId: string; filePath: string; relativePath: string; staged: boolean }
+        data: {
+          worktreeId: string
+          filePath: string
+          relativePath: string
+          staged: boolean
+          runtimeEnvironmentId?: string
+        }
       ) => callback(data)
       ipcRenderer.on('ui:openDiffFromMobile', listener)
       return () => ipcRenderer.removeListener('ui:openDiffFromMobile', listener)

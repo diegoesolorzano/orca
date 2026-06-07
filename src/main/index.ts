@@ -100,6 +100,7 @@ import {
 } from './ipc/pty'
 import { AgentBrowserBridge } from './browser/agent-browser-bridge'
 import { browserManager } from './browser/browser-manager'
+import { initializeBrowserSessionsForApp } from './browser/browser-session-startup'
 import { setUnreadDockBadgeCount } from './dock/unread-badge'
 import { AutomationService } from './automations/service'
 import { AgentAwakeService } from './agent-awake-service'
@@ -1067,6 +1068,9 @@ app.whenReady().then(async () => {
   }
   // Fork feature: human time tracking against the local time-tracker service.
   wireTimeTracker(store)
+  // Why: browser sessions are used by desktop webviews and runtime profile
+  // commands, so initialize them at app startup instead of a renderer IPC path.
+  initializeBrowserSessionsForApp()
   agentAwakeService = new AgentAwakeService()
   agentAwakeService.setEnabled(store.getSettings().keepComputerAwakeWhileAgentsRun)
   // Why: disk-hydrated status rows are UI continuity only. The service starts
@@ -1158,7 +1162,10 @@ app.whenReady().then(async () => {
     // provider reference eagerly here would freeze the pre-daemon LocalPtyProvider
     // and defeat the teardown helper's prefix sweep (design §4.3 wire-up).
     getLocalProvider: () => getLocalPtyProvider(),
-    onPtyStopped: clearProviderPtyState
+    onPtyStopped: clearProviderPtyState,
+    onTerminalAgentStatus: (event) => {
+      agentHookServer.ingestTerminalStatus(event)
+    }
   })
   runtime = runtimeService
   automations = new AutomationService(store, { claudeUsage, codexUsage })

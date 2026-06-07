@@ -9,8 +9,13 @@ import {
 import type { AgentStatus } from '../../shared/agent-detection'
 import {
   AGENT_STATUS_STALE_AFTER_MS,
+  type ParsedAgentStatusPayload,
   type AgentStatusOrchestrationContext
 } from '../../shared/agent-status-types'
+import {
+  createAgentStatusOscProcessor,
+  type ProcessedAgentStatusChunk
+} from '../../shared/agent-status-osc'
 import { gitExecFileAsync, wslAwareSpawn } from '../git/runner'
 import {
   cleanupClaimedCloneTarget,
@@ -19,7 +24,8 @@ import {
   getClonePathComparisonKey
 } from '../git/repo-clone-path'
 import { createHash, randomUUID } from 'crypto'
-import { isAbsolute, join } from 'path'
+import { homedir } from 'os'
+import { isAbsolute, join, resolve } from 'path'
 import { mkdir, readFile, readdir, rm, stat } from 'fs/promises'
 import { OrchestrationDb } from './orchestration/db'
 import { formatMessagesForInjection } from './orchestration/formatter'
@@ -70,14 +76,16 @@ import type {
   TerminalLayoutSnapshot,
   TerminalTab,
   TuiAgent,
-  WorkspaceCreateTelemetrySource
+  WorkspaceCreateTelemetrySource,
+  DirEntry
 } from '../../shared/types'
+import type { RuntimeClientEvent } from '../../shared/runtime-client-events'
+import { toRuntimeActivateWorktreeEvent } from '../../shared/runtime-client-events'
 import type { FeatureInteractionId } from '../../shared/feature-interactions'
 import type { TerminalPaneSplitSource } from '../../shared/feature-education-telemetry'
 import { FOLDER_WORKSPACE_INSTANCE_SEPARATOR, splitWorktreeId } from '../../shared/worktree-id'
 import { clampLinearIssueListLimit } from '../../shared/linear-issue-read-limits'
 import { isFolderRepo } from '../../shared/repo-kind'
-import { getNextProjectGroupOrder } from '../../shared/project-groups'
 import { DEFAULT_WORKSPACE_STATUS_ID } from '../../shared/workspace-statuses'
 import { buildSetupRunnerCommand } from '../../shared/setup-runner-command'
 import { TASK_PROVIDERS } from '../../shared/task-providers'
@@ -655,6 +663,7 @@ function isCursorAgentTitle(title: string | null | undefined): boolean {
 type RuntimePtyWorktreeRecord = {
   ptyId: string
   worktreeId: string
+  connectionId: string | null
   // Why: background CLI PTYs can outlive a failed renderer reveal. Preserve the
   // spawn-time tab/pane identity so later reveals can adopt under the env key.
   tabId: string | null
@@ -673,12 +682,26 @@ type RuntimePtyWorktreeRecord = {
   preview: string
 }
 
+export type RuntimeTerminalAgentStatusEvent = {
+  ptyId: string
+  source: 'mounted-leaf' | 'pty-record'
+  paneKey: string
+  tabId?: string
+  worktreeId?: string
+  connectionId?: string | null
+  payload: ParsedAgentStatusPayload
+}
+
 type RuntimeHeadlessTerminal = {
   emulator: HeadlessEmulator
   // Why: serialize can race with newer writes appended to writeChain; return
   // the seq actually painted into this emulator, not the latest PTY seq.
   outputSequence: number
   writeChain: Promise<void>
+}
+
+type HeadlessSeedMetadata = {
+  cwd?: string | null
 }
 
 type RuntimePtyController = {
@@ -783,8 +806,19 @@ type RuntimeNotifier = {
   focusEditorTab?(tabId: string, worktreeId: string): void
   closeSessionTab?(tabId: string, worktreeId: string): void
   moveSessionTab?(worktreeId: string, move: RuntimeMobileSessionTabMove): void
-  openFile?(worktreeId: string, filePath: string, relativePath: string): void
-  openDiff?(worktreeId: string, filePath: string, relativePath: string, staged: boolean): void
+  openFile?(
+    worktreeId: string,
+    filePath: string,
+    relativePath: string,
+    runtimeEnvironmentId?: string | null
+  ): void
+  openDiff?(
+    worktreeId: string,
+    filePath: string,
+    relativePath: string,
+    staged: boolean,
+    runtimeEnvironmentId?: string | null
+  ): void
   readMobileMarkdownTab?(worktreeId: string, tabId: string): Promise<RuntimeMarkdownReadTabResult>
   saveMobileMarkdownTab?(
     worktreeId: string,
@@ -1085,6 +1119,25 @@ async function pathExists(pathValue: string): Promise<boolean> {
   }
 }
 
+function resolveServerBrowsePath(pathValue: string): string {
+  const trimmed = pathValue.trim() || '~'
+  if (trimmed.includes('\0')) {
+    throw new Error('Path cannot contain null bytes')
+  }
+  if (trimmed === '~') {
+    return homedir()
+  }
+  if (/^~[\\/]/.test(trimmed)) {
+    return resolve(homedir(), trimmed.slice(2))
+  }
+  if (isAbsolute(trimmed)) {
+    return resolve(trimmed)
+  }
+  // Why: remote clients do not share the server process cwd; relative browse
+  // inputs are anchored to the server user's home to match the `~` picker root.
+  return resolve(homedir(), trimmed)
+}
+
 type ResolvedWorktree = Worktree & {
   parentWorktreeId: string | null
   childWorktreeIds: string[]
@@ -1243,6 +1296,7 @@ export class OrcaRuntimeService {
   private waitersByHandle = new Map<string, Set<TerminalWaiter>>()
   private ptyController: RuntimePtyController | null = null
   private notifier: RuntimeNotifier | null = null
+  private clientEventListeners = new Set<(event: RuntimeClientEvent) => void>()
   private forkBackfillStarted = false
   private agentBrowserBridge: AgentBrowserBridge | null = null
   private resolvedWorktreeCache: ResolvedWorktreeCache | null = null
@@ -1255,7 +1309,10 @@ export class OrcaRuntimeService {
   // Why: mobile clients subscribe to terminal output via terminal.subscribe.
   // These listeners fire on every onPtyData call, enabling real-time streaming
   // without polling. Keyed by ptyId for O(1) lookup per data event.
-  private dataListeners = new Map<string, Set<(data: string) => void>>()
+  private dataListeners = new Map<
+    string,
+    Set<(data: string, meta?: { seq?: number; rawLength?: number }) => void>
+  >()
   // Why: startup draft paste can subscribe after the agent already emitted its
   // ready marker. Keep a bounded raw buffer so fast startup output is replayed.
   private recentPtyOutputById = new Map<string, string>()
@@ -1290,6 +1347,13 @@ export class OrcaRuntimeService {
   private ptysById = new Map<string, RuntimePtyWorktreeRecord>()
   private headlessTerminals = new Map<string, RuntimeHeadlessTerminal>()
   private ptyOutputSequenceById = new Map<string, number>()
+  // Why: OSC 9999 status can span PTY chunks. Keeping parser state in the
+  // runtime lets hidden/model-owned terminals observe agent state without a
+  // mounted xterm view.
+  private agentStatusOscProcessorsByPtyId = new Map<
+    string,
+    ReturnType<typeof createAgentStatusOscProcessor>
+  >()
   // Why: per-PTY hydration state guards against double-hydration. Keys:
   //   'pending'  → maybeHydrateHeadlessFromRenderer is in flight
   //   'done'     → hydration completed (success or skip); never run again
@@ -1492,6 +1556,7 @@ export class OrcaRuntimeService {
   private preservedBranchCleanupByWorktreeId = new Map<string, PreservedBranchCleanupTarget>()
   private readonly getLocalProviderFn: (() => IPtyProvider) | null
   private readonly onPtyStopped: ((ptyId: string) => void) | null
+  private readonly onTerminalAgentStatus: ((event: RuntimeTerminalAgentStatusEvent) => void) | null
   private accountServices: RuntimeAccountServices | null = null
   private commitMessageAgentEnv: CommitMessageAgentEnvironmentResolvers | null = null
   private automationService: AutomationService | null = null
@@ -1509,7 +1574,11 @@ export class OrcaRuntimeService {
   constructor(
     store: RuntimeStore | null = null,
     stats?: StatsCollector,
-    deps?: { getLocalProvider?: () => IPtyProvider; onPtyStopped?: (ptyId: string) => void }
+    deps?: {
+      getLocalProvider?: () => IPtyProvider
+      onPtyStopped?: (ptyId: string) => void
+      onTerminalAgentStatus?: (event: RuntimeTerminalAgentStatusEvent) => void
+    }
   ) {
     this.store = store
     if (stats) {
@@ -1524,6 +1593,7 @@ export class OrcaRuntimeService {
     // provider (design §4.3 wire-up).
     this.getLocalProviderFn = deps?.getLocalProvider ?? null
     this.onPtyStopped = deps?.onPtyStopped ?? null
+    this.onTerminalAgentStatus = deps?.onTerminalAgentStatus ?? null
   }
 
   getLocalProvider(): IPtyProvider | null {
@@ -1871,6 +1941,42 @@ export class OrcaRuntimeService {
       this.forkBackfillStarted = true
       void this.backfillForkUpstreams()
     }
+  }
+
+  onClientEvent(listener: (event: RuntimeClientEvent) => void): () => void {
+    this.clientEventListeners.add(listener)
+    return () => {
+      this.clientEventListeners.delete(listener)
+    }
+  }
+
+  private emitClientEvent(event: RuntimeClientEvent): void {
+    for (const listener of this.clientEventListeners) {
+      listener(event)
+    }
+  }
+
+  private notifyWorktreesChanged(repoId: string): void {
+    this.notifier?.worktreesChanged(repoId)
+    this.emitClientEvent({ type: 'worktreesChanged', repoId })
+  }
+
+  private notifyReposChanged(): void {
+    this.notifier?.reposChanged()
+    this.emitClientEvent({ type: 'reposChanged' })
+  }
+
+  private notifyActivateWorktree(
+    repoId: string,
+    worktreeId: string,
+    setup?: CreateWorktreeResult['setup'],
+    startup?: WorktreeStartupLaunch,
+    defaultTabs?: CreateWorktreeResult['defaultTabs']
+  ): void {
+    this.notifier?.activateWorktree(repoId, worktreeId, setup, startup, defaultTabs)
+    this.emitClientEvent(
+      toRuntimeActivateWorktreeEvent(repoId, worktreeId, setup, startup, defaultTabs)
+    )
   }
 
   setAgentBrowserBridge(bridge: AgentBrowserBridge | null): void {
@@ -2698,17 +2804,17 @@ export class OrcaRuntimeService {
     requireStore: () => this.requireStore(),
     resolveWorktreeSelector: (selector) => this.resolveWorktreeSelector(selector),
     resolveRuntimeGitTarget: (selector) => this.resolveRuntimeGitTarget(selector),
-    openFile: (worktreeId, filePath, relativePath) => {
+    openFile: (worktreeId, filePath, relativePath, runtimeEnvironmentId) => {
       if (!this.notifier?.openFile) {
         throw new Error('renderer_unavailable')
       }
-      this.notifier.openFile(worktreeId, filePath, relativePath)
+      this.notifier.openFile(worktreeId, filePath, relativePath, runtimeEnvironmentId)
     },
-    openDiff: (worktreeId, filePath, relativePath, staged) => {
+    openDiff: (worktreeId, filePath, relativePath, staged, runtimeEnvironmentId) => {
       if (!this.notifier?.openDiff) {
         throw new Error('renderer_unavailable')
       }
-      this.notifier.openDiff(worktreeId, filePath, relativePath, staged)
+      this.notifier.openDiff(worktreeId, filePath, relativePath, staged, runtimeEnvironmentId)
     }
   })
 
@@ -2887,13 +2993,14 @@ export class OrcaRuntimeService {
     }
   }
 
-  registerPty(ptyId: string, worktreeId: string): void {
-    this.recordPtyWorktree(ptyId, worktreeId, { connected: true })
+  registerPty(ptyId: string, worktreeId: string, connectionId: string | null = null): void {
+    this.recordPtyWorktree(ptyId, worktreeId, { connected: true, connectionId })
   }
 
   onPtyData(ptyId: string, data: string, at: number): number {
     const outputSequence = (this.ptyOutputSequenceById.get(ptyId) ?? 0) + data.length
     this.ptyOutputSequenceById.set(ptyId, outputSequence)
+    const agentStatusChunk = this.processAgentStatusOscForPty(ptyId, data)
     this.recentPtyOutputById.set(
       ptyId,
       appendRecentPtyOutput(this.recentPtyOutputById.get(ptyId), data)
@@ -3034,20 +3141,91 @@ export class OrcaRuntimeService {
       }
     }
 
+    this.emitTerminalAgentStatusEvents(ptyId, agentStatusChunk)
+
     const listeners = this.dataListeners.get(ptyId)
     if (listeners) {
+      const meta = { seq: outputSequence, rawLength: data.length }
       for (const listener of listeners) {
-        listener(data)
+        listener(data, meta)
       }
     }
     return outputSequence
+  }
+
+  private processAgentStatusOscForPty(ptyId: string, data: string): ProcessedAgentStatusChunk {
+    let processor = this.agentStatusOscProcessorsByPtyId.get(ptyId)
+    if (!processor) {
+      processor = createAgentStatusOscProcessor()
+      this.agentStatusOscProcessorsByPtyId.set(ptyId, processor)
+    }
+    return processor(data)
+  }
+
+  private emitTerminalAgentStatusEvents(ptyId: string, chunk: ProcessedAgentStatusChunk): void {
+    if (!this.onTerminalAgentStatus || chunk.payloads.length === 0) {
+      return
+    }
+    const targets = new Map<
+      string,
+      {
+        source: 'mounted-leaf' | 'pty-record'
+        paneKey: string
+        tabId?: string
+        worktreeId?: string
+        connectionId?: string | null
+      }
+    >()
+    const pty = this.ptysById.get(ptyId)
+    const connectionId = pty?.connectionId ?? null
+    for (const leaf of this.getLeavesForPty(ptyId)) {
+      const paneKey = this.makeRuntimePaneKey(leaf)
+      targets.set(paneKey, {
+        source: 'mounted-leaf',
+        paneKey,
+        tabId: leaf.tabId,
+        worktreeId: leaf.worktreeId,
+        connectionId
+      })
+    }
+    if (targets.size === 0 && pty?.paneKey) {
+      targets.set(pty.paneKey, {
+        source: 'pty-record',
+        paneKey: pty.paneKey,
+        tabId: pty.tabId ?? undefined,
+        worktreeId: pty.worktreeId,
+        connectionId
+      })
+    }
+    for (const payload of chunk.payloads) {
+      for (const target of targets.values()) {
+        try {
+          this.onTerminalAgentStatus({
+            ptyId,
+            ...target,
+            payload
+          })
+        } catch (err) {
+          console.error('[runtime] terminal agent status listener threw', {
+            ptyId,
+            paneKey: target.paneKey,
+            state: payload.state,
+            agentType: payload.agentType,
+            err
+          })
+        }
+      }
+    }
   }
 
   getPtyOutputSequence(ptyId: string): number {
     return this.ptyOutputSequenceById.get(ptyId) ?? 0
   }
 
-  subscribeToTerminalData(ptyId: string, listener: (data: string) => void): () => void {
+  subscribeToTerminalData(
+    ptyId: string,
+    listener: (data: string, meta?: { seq?: number; rawLength?: number }) => void
+  ): () => void {
     let listeners = this.dataListeners.get(ptyId)
     if (!listeners) {
       listeners = new Set()
@@ -3113,14 +3291,30 @@ export class OrcaRuntimeService {
   serializeTerminalBuffer(
     ptyId: string,
     opts: { scrollbackRows?: number } = {}
-  ): Promise<{ data: string; cols: number; rows: number; seq?: number } | null> {
+  ): Promise<{
+    data: string
+    cols: number
+    rows: number
+    cwd?: string | null
+    lastTitle?: string
+    seq?: number
+    source?: 'headless' | 'renderer'
+  } | null> {
     return this.serializeTerminalBufferFromAvailableState(ptyId, opts)
   }
 
   serializeMainTerminalBuffer(
     ptyId: string,
     opts: { scrollbackRows?: number } = {}
-  ): Promise<{ data: string; cols: number; rows: number; seq?: number } | null> {
+  ): Promise<{
+    data: string
+    cols: number
+    rows: number
+    cwd?: string | null
+    lastTitle?: string
+    seq?: number
+    source?: 'headless' | 'renderer'
+  } | null> {
     return this.serializeHeadlessTerminalBuffer(ptyId, { ...opts, includeEmpty: true })
   }
 
@@ -3150,7 +3344,12 @@ export class OrcaRuntimeService {
   // wins over the renderer-path fallback. Seeding the emulator with the
   // adapter's snapshot/cold-restore data makes mobile and desktop agree on
   // what scrollback is available.
-  seedHeadlessTerminal(ptyId: string, data: string, size?: { cols: number; rows: number }): void {
+  seedHeadlessTerminal(
+    ptyId: string,
+    data: string,
+    size?: { cols: number; rows: number },
+    metadata: HeadlessSeedMetadata = {}
+  ): void {
     if (!data) {
       return
     }
@@ -3168,7 +3367,12 @@ export class OrcaRuntimeService {
     }
     this.headlessTerminals.set(ptyId, state)
     state.writeChain = state.writeChain
-      .then(() => state.emulator.write(data))
+      .then(async () => {
+        await state.emulator.write(data)
+        if (metadata.cwd !== undefined) {
+          state.emulator.setCwd(metadata.cwd)
+        }
+      })
       .catch(() => {
         // Seeding is best-effort; live data will continue to populate the
         // emulator even if the snapshot replay fails.
@@ -3235,6 +3439,7 @@ export class OrcaRuntimeService {
           state.emulator.resize(ptyDims.cols, ptyDims.rows)
         }
         if (rendered.lastTitle) {
+          state.emulator.setLastTitle(rendered.lastTitle)
           this.applySeededAgentStatus(ptyId, rendered.lastTitle)
         }
       } catch {
@@ -3315,7 +3520,15 @@ export class OrcaRuntimeService {
   private async serializeTerminalBufferFromAvailableState(
     ptyId: string,
     opts: { scrollbackRows?: number } = {}
-  ): Promise<{ data: string; cols: number; rows: number; seq?: number } | null> {
+  ): Promise<{
+    data: string
+    cols: number
+    rows: number
+    cwd?: string | null
+    lastTitle?: string
+    seq?: number
+    source?: 'headless' | 'renderer'
+  } | null> {
     const headlessSnapshot = await this.serializeHeadlessTerminalBuffer(ptyId, opts)
     if (headlessSnapshot) {
       return headlessSnapshot
@@ -3325,6 +3538,7 @@ export class OrcaRuntimeService {
       data: string
       cols: number
       rows: number
+      cwd?: string | null
       lastTitle?: string
     } | null = null
     try {
@@ -3342,15 +3556,23 @@ export class OrcaRuntimeService {
       // below can still preserve colored terminal state.
     }
     if (rendererSnapshot && rendererSnapshot.data.length > 0) {
-      return rendererSnapshot
+      return { ...rendererSnapshot, source: 'renderer' }
     }
-    return rendererSnapshot
+    return rendererSnapshot ? { ...rendererSnapshot, source: 'renderer' } : null
   }
 
   private async serializeHeadlessTerminalBuffer(
     ptyId: string,
     opts: { scrollbackRows?: number; includeEmpty?: boolean } = {}
-  ): Promise<{ data: string; cols: number; rows: number; seq?: number } | null> {
+  ): Promise<{
+    data: string
+    cols: number
+    rows: number
+    cwd?: string | null
+    lastTitle?: string
+    seq?: number
+    source?: 'headless'
+  } | null> {
     const state = this.headlessTerminals.get(ptyId)
     if (!state) {
       return null
@@ -3368,7 +3590,15 @@ export class OrcaRuntimeService {
     const snapshot = state.emulator.getSnapshot({ scrollbackRows })
     const data = snapshot.rehydrateSequences + snapshot.snapshotAnsi
     return data.length > 0 || opts.includeEmpty === true
-      ? { data, cols: snapshot.cols, rows: snapshot.rows, seq: state.outputSequence }
+      ? {
+          data,
+          cols: snapshot.cols,
+          rows: snapshot.rows,
+          cwd: snapshot.cwd,
+          lastTitle: snapshot.lastTitle,
+          seq: state.outputSequence,
+          source: 'headless'
+        }
       : null
   }
 
@@ -4081,6 +4311,7 @@ export class OrcaRuntimeService {
     this.lastRendererSizes.delete(ptyId)
     this.recentPtyOutputById.delete(ptyId)
     this.ptyOutputSequenceById.delete(ptyId)
+    this.agentStatusOscProcessorsByPtyId.delete(ptyId)
     // Layout state machine: clear `layouts` and `layoutQueues`. Any
     // already-queued applyLayout work for this ptyId will run, but every
     // applyLayout re-checks `layouts.has(ptyId)` (or fresh-subscribe) and
@@ -5825,7 +6056,7 @@ export class OrcaRuntimeService {
       parentGroupId: input.parentGroupId ?? null,
       createdFrom: input.createdFrom ?? 'manual'
     })
-    this.notifier?.reposChanged()
+    this.notifyReposChanged()
     return group
   }
 
@@ -5838,7 +6069,7 @@ export class OrcaRuntimeService {
     }
     const updated = this.store.updateProjectGroup(groupId, updates)
     if (updated) {
-      this.notifier?.reposChanged()
+      this.notifyReposChanged()
     }
     return updated
   }
@@ -5849,7 +6080,7 @@ export class OrcaRuntimeService {
     }
     const deleted = this.store.deleteProjectGroup(groupId)
     if (deleted) {
-      this.notifier?.reposChanged()
+      this.notifyReposChanged()
     }
     return { deleted }
   }
@@ -5867,7 +6098,7 @@ export class OrcaRuntimeService {
     if (!moved) {
       throw new Error('repo_not_found')
     }
-    this.notifier?.reposChanged()
+    this.notifyReposChanged()
     return moved
   }
 
@@ -5876,6 +6107,29 @@ export class OrcaRuntimeService {
       throw new Error('Project path must be an absolute path')
     }
     return scanNestedRepos({ path, options: { timeoutMs: 15_000 } })
+  }
+
+  async browseServerDir(pathValue: string): Promise<{ resolvedPath: string; entries: DirEntry[] }> {
+    const dirPath = resolveServerBrowsePath(pathValue)
+    const dirStat = await stat(dirPath)
+    if (!dirStat.isDirectory()) {
+      throw new Error(`${dirPath} is not a directory`)
+    }
+    const entries = await readdir(dirPath, { withFileTypes: true })
+    const mapped = entries
+      .filter((entry) => entry.name !== '.' && entry.name !== '..')
+      .map((entry) => ({
+        name: entry.name,
+        isDirectory: entry.isDirectory(),
+        isSymlink: entry.isSymbolicLink()
+      }))
+    mapped.sort((a, b) => {
+      if (a.isDirectory !== b.isDirectory) {
+        return a.isDirectory ? -1 : 1
+      }
+      return a.name.localeCompare(b.name)
+    })
+    return { resolvedPath: dirPath, entries: mapped }
   }
 
   async importNestedRepos(args: {
@@ -5905,7 +6159,7 @@ export class OrcaRuntimeService {
         error: 'Repository was not found in the nested repo scan result'
       })
     )
-    for (const repoPath of selection.selectedPaths) {
+    for (const [projectGroupOrder, repoPath] of selection.selectedPaths.entries()) {
       try {
         if (!isGitRepo(repoPath)) {
           results.push({ path: repoPath, status: 'failed', error: 'Not a valid git repository' })
@@ -5917,7 +6171,7 @@ export class OrcaRuntimeService {
         const group = groupResolver.getGroupForRepo(repoPath)
         if (existing) {
           if (group) {
-            this.store.moveProjectToGroup(existing.id, group.id)
+            this.store.moveProjectToGroup(existing.id, group.id, projectGroupOrder)
           }
           results.push({ path: repoPath, projectId: existing.id, status: 'already-known' })
           continue
@@ -5934,7 +6188,7 @@ export class OrcaRuntimeService {
           ...(group
             ? {
                 projectGroupId: group.id,
-                projectGroupOrder: getNextProjectGroupOrder(this.store.getRepos(), group.id)
+                projectGroupOrder
               }
             : {})
         }
@@ -5960,7 +6214,7 @@ export class OrcaRuntimeService {
       }
     }
     this.invalidateResolvedWorktreeCache()
-    this.notifier?.reposChanged()
+    this.notifyReposChanged()
     const rootGroup = groupResolver.getRootGroup()
     return {
       ...(rootGroup && importedCount + alreadyKnownCount > 0 ? { group: rootGroup } : {}),
@@ -6039,7 +6293,7 @@ export class OrcaRuntimeService {
     }
     this.store.addRepo(repo)
     this.invalidateResolvedWorktreeCache()
-    this.notifier?.reposChanged()
+    this.notifyReposChanged()
     return this.store.getRepo(repo.id) ?? repo
   }
 
@@ -6156,7 +6410,7 @@ export class OrcaRuntimeService {
     this.store.addRepo(repo)
     invalidateAuthorizedRootsCache()
     this.invalidateResolvedWorktreeCache()
-    this.notifier?.reposChanged()
+    this.notifyReposChanged()
     return { repo: this.store.getRepo(repo.id) ?? repo }
   }
 
@@ -6275,7 +6529,7 @@ export class OrcaRuntimeService {
       if (isFolderRepo(existing)) {
         const updated = this.store.updateRepo(existing.id, { kind: 'git' })
         if (updated) {
-          this.notifier?.reposChanged()
+          this.notifyReposChanged()
           return updated
         }
       }
@@ -6297,7 +6551,7 @@ export class OrcaRuntimeService {
     this.store.addRepo(repo)
     invalidateAuthorizedRootsCache()
     this.invalidateResolvedWorktreeCache()
-    this.notifier?.reposChanged()
+    this.notifyReposChanged()
     return this.store.getRepo(repo.id) ?? repo
   }
 
@@ -6318,7 +6572,7 @@ export class OrcaRuntimeService {
       throw new Error('repo_not_found')
     }
     this.invalidateResolvedWorktreeCache()
-    this.notifier?.reposChanged()
+    this.notifyReposChanged()
     return updated
   }
 
@@ -6361,7 +6615,7 @@ export class OrcaRuntimeService {
       invalidateAuthorizedRootsCache()
     }
     this.invalidateResolvedWorktreeCache()
-    this.notifier?.reposChanged()
+    this.notifyReposChanged()
     return updated
   }
 
@@ -6373,7 +6627,7 @@ export class OrcaRuntimeService {
     this.store.removeProject(repo.id)
     this.invalidateResolvedWorktreeCache()
     invalidateAuthorizedRootsCache()
-    this.notifier?.reposChanged()
+    this.notifyReposChanged()
     return { removed: true }
   }
 
@@ -6402,7 +6656,7 @@ export class OrcaRuntimeService {
       return { status: 'rejected' }
     }
     this.invalidateResolvedWorktreeCache()
-    this.notifier?.reposChanged()
+    this.notifyReposChanged()
     return { status: 'applied' }
   }
 
@@ -6576,7 +6830,7 @@ export class OrcaRuntimeService {
         changed = true
       }
       if (changed) {
-        this.notifier?.reposChanged()
+        this.notifyReposChanged()
       }
     } catch {
       // Best-effort startup backfill; never disrupt launch.
@@ -7879,7 +8133,7 @@ export class OrcaRuntimeService {
 
     // Why: inactive worktree terminal panes are renderer-owned and may not have
     // live PTYs until the desktop activates the worktree and mounts them.
-    this.notifier?.activateWorktree(repo.id, worktree.id)
+    this.notifyActivateWorktree(repo.id, worktree.id)
     return { repoId: repo.id, worktreeId: worktree.id, activated: true }
   }
 
@@ -8348,7 +8602,7 @@ export class OrcaRuntimeService {
       })
       const worktree = mergeRuntimeFolderWorkspace(repo, worktreeId, meta)
       this.invalidateResolvedWorktreeCache()
-      this.notifier?.worktreesChanged(repo.id)
+      this.notifyWorktreesChanged(repo.id)
       const shouldActivate = args.activate === true || args.runHooks === true
       let warning: string | undefined
       let didSpawnStartup = false
@@ -8378,9 +8632,9 @@ export class OrcaRuntimeService {
       }
       if (shouldActivate) {
         if (effectiveStartup && !didSpawnStartup) {
-          this.notifier?.activateWorktree(repo.id, worktree.id, undefined, effectiveStartup)
+          this.notifyActivateWorktree(repo.id, worktree.id, undefined, effectiveStartup)
         } else {
-          this.notifier?.activateWorktree(repo.id, worktree.id)
+          this.notifyActivateWorktree(repo.id, worktree.id)
         }
       } else if (this.ptyController?.spawn && !didSpawnStartup) {
         try {
@@ -8755,7 +9009,7 @@ export class OrcaRuntimeService {
     // unknown repository or worktree path".
     invalidateAuthorizedRootsCache()
 
-    this.notifier?.worktreesChanged(repo.id)
+    this.notifyWorktreesChanged(repo.id)
     const shouldActivate = args.activate === true || args.runHooks === true
     let didSpawnStartup = false
     let didSpawnSetup = false
@@ -8834,7 +9088,7 @@ export class OrcaRuntimeService {
       // the user can watch prompts/output in a visible pane.
       const activationSetup = didSpawnSetup ? undefined : setup
       if (effectiveStartup && !didSpawnStartup) {
-        this.notifier?.activateWorktree(
+        this.notifyActivateWorktree(
           repo.id,
           worktree.id,
           activationSetup,
@@ -8842,13 +9096,7 @@ export class OrcaRuntimeService {
           defaultTabs
         )
       } else {
-        this.notifier?.activateWorktree(
-          repo.id,
-          worktree.id,
-          activationSetup,
-          undefined,
-          defaultTabs
-        )
+        this.notifyActivateWorktree(repo.id, worktree.id, activationSetup, undefined, defaultTabs)
       }
     } else if (this.ptyController?.spawn) {
       try {
@@ -8981,7 +9229,7 @@ export class OrcaRuntimeService {
     }
 
     this.invalidateResolvedWorktreeCache()
-    this.notifier?.worktreesChanged(repo.id)
+    this.notifyWorktreesChanged(repo.id)
 
     let warning = result.warning
     let didSpawnStartup = false
@@ -9060,7 +9308,7 @@ export class OrcaRuntimeService {
     if (shouldActivate) {
       const activationSetup = didSpawnSetup ? undefined : result.setup
       if (args.startup && !didSpawnStartup) {
-        this.notifier?.activateWorktree(
+        this.notifyActivateWorktree(
           repo.id,
           result.worktree.id,
           activationSetup,
@@ -9068,7 +9316,7 @@ export class OrcaRuntimeService {
           result.defaultTabs
         )
       } else {
-        this.notifier?.activateWorktree(
+        this.notifyActivateWorktree(
           repo.id,
           result.worktree.id,
           activationSetup,
@@ -9577,7 +9825,7 @@ export class OrcaRuntimeService {
     // Why: unlike renderer-initiated optimistic updates, CLI callers need an
     // explicit push so the editor refreshes metadata changed outside the UI.
     this.invalidateResolvedWorktreeCache()
-    this.notifier?.worktreesChanged(worktree.repoId)
+    this.notifyWorktreesChanged(worktree.repoId)
     return await this.showManagedWorktree(`id:${worktree.id}`)
   }
 
@@ -9592,7 +9840,7 @@ export class OrcaRuntimeService {
       updated++
     }
     this.invalidateResolvedWorktreeCache()
-    this.notifier?.reposChanged()
+    this.notifyReposChanged()
     return { updated }
   }
 
@@ -10027,7 +10275,7 @@ export class OrcaRuntimeService {
         this.removeWorktreeMetadataAndHistory(store, removalTarget.id)
         this.preservedBranchCleanupByWorktreeId.delete(removalTarget.id)
         this.invalidateResolvedWorktreeCache()
-        this.notifier?.worktreesChanged(repo.id)
+        this.notifyWorktreesChanged(repo.id)
         return {}
       }
       const provider = repo.connectionId ? requireSshGitProvider(repo.connectionId) : null
@@ -10101,7 +10349,7 @@ export class OrcaRuntimeService {
           this.preservedBranchCleanupByWorktreeId.delete(removalTarget.id)
           this.invalidateResolvedWorktreeCache()
           invalidateAuthorizedRootsCache()
-          this.notifier?.worktreesChanged(repo.id)
+          this.notifyWorktreesChanged(repo.id)
           return {}
         }
         if (await isRuntimeWorktreePathMissing(repo, removalTarget.path)) {
@@ -10127,7 +10375,7 @@ export class OrcaRuntimeService {
           this.preservedBranchCleanupByWorktreeId.delete(removalTarget.id)
           this.invalidateResolvedWorktreeCache()
           invalidateAuthorizedRootsCache()
-          this.notifier?.worktreesChanged(repo.id)
+          this.notifyWorktreesChanged(repo.id)
           return {}
         }
         throw new Error(`Refusing to delete unregistered worktree path: ${removalTarget.path}`)
@@ -10159,7 +10407,7 @@ export class OrcaRuntimeService {
         this.removeWorktreeMetadataAndHistory(store, removalTarget.id)
         this.invalidateResolvedWorktreeCache()
         invalidateAuthorizedRootsCache()
-        this.notifier?.worktreesChanged(repo.id)
+        this.notifyWorktreesChanged(repo.id)
         return removalResult ?? {}
       }
 
@@ -10249,7 +10497,7 @@ export class OrcaRuntimeService {
           this.preservedBranchCleanupByWorktreeId.delete(removalTarget.id)
           this.invalidateResolvedWorktreeCache()
           invalidateAuthorizedRootsCache()
-          this.notifier?.worktreesChanged(repo.id)
+          this.notifyWorktreesChanged(repo.id)
           return {
             ...(warning ? { warning } : {})
           }
@@ -10273,7 +10521,7 @@ export class OrcaRuntimeService {
       this.removeWorktreeMetadataAndHistory(store, removalTarget.id)
       this.invalidateResolvedWorktreeCache()
       invalidateAuthorizedRootsCache()
-      this.notifier?.worktreesChanged(repo.id)
+      this.notifyWorktreesChanged(repo.id)
       return {
         ...removalResult,
         ...(warning ? { warning } : {})
@@ -10381,7 +10629,7 @@ export class OrcaRuntimeService {
         ...(opts.persistHostSessionBinding ? { persistHostSessionBinding: true } : {})
       })
       this.registerPreAllocatedHandleForPty(result.id, preAllocatedHandle)
-      this.registerPty(result.id, worktree.id)
+      this.registerPty(result.id, worktree.id, repo?.connectionId ?? null)
       const pty = this.getOrCreatePtyWorktreeRecord(result.id)
       if (pty) {
         pty.title = opts.title ?? null
@@ -10987,7 +11235,7 @@ export class OrcaRuntimeService {
       preAllocatedHandle
     })
     this.registerPreAllocatedHandleForPty(result.id, preAllocatedHandle)
-    this.registerPty(result.id, worktree.id)
+    this.registerPty(result.id, worktree.id, repo?.connectionId ?? null)
     const createdPty = this.getOrCreatePtyWorktreeRecord(result.id)
     if (createdPty) {
       createdPty.tabId = parentTabId
@@ -11792,7 +12040,7 @@ export class OrcaRuntimeService {
    *  name surfaces without waiting for the next ambient refresh. */
   notifyBranchRenamed(repoId: string): void {
     this.invalidateResolvedWorktreeCache()
-    this.notifier?.worktreesChanged(repoId)
+    this.notifyWorktreesChanged(repoId)
   }
 
   private recordPtyWorktree(
@@ -11801,7 +12049,7 @@ export class OrcaRuntimeService {
     state: Partial<
       Pick<
         RuntimePtyWorktreeRecord,
-        'connected' | 'lastOutputAt' | 'preview' | 'tabId' | 'paneKey' | 'title'
+        'connected' | 'lastOutputAt' | 'preview' | 'tabId' | 'paneKey' | 'title' | 'connectionId'
       >
     > = {}
   ): RuntimePtyWorktreeRecord {
@@ -11810,6 +12058,7 @@ export class OrcaRuntimeService {
       pty = {
         ptyId,
         worktreeId,
+        connectionId: state.connectionId ?? parseAppSshPtyId(ptyId)?.connectionId ?? null,
         tabId: state.tabId ?? null,
         paneKey: state.paneKey ?? null,
         connected: state.connected ?? true,
@@ -11833,6 +12082,9 @@ export class OrcaRuntimeService {
     }
 
     pty.worktreeId = worktreeId
+    if (state.connectionId !== undefined) {
+      pty.connectionId = state.connectionId
+    }
     if (state.tabId !== undefined) {
       pty.tabId = state.tabId
     }
@@ -11947,6 +12199,7 @@ export class OrcaRuntimeService {
     this.ptysById.delete(ptyId)
     this.recentPtyOutputById.delete(ptyId)
     this.ptyOutputSequenceById.delete(ptyId)
+    this.agentStatusOscProcessorsByPtyId.delete(ptyId)
     const handle = this.handleByPtyId.get(ptyId)
     if (handle) {
       this.handleByPtyId.delete(ptyId)

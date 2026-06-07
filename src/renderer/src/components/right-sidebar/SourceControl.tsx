@@ -2062,7 +2062,7 @@ function SourceControlInner(): React.JSX.Element {
         setGenerateErrors((prev) => ({
           ...prev,
           [activeWorktreeId]:
-            'Custom command is empty. Add one in Settings -> Git -> Source Control AI.'
+            'Custom command is empty. Add one in Settings -> Git -> Git AI Author.'
         }))
         return
       }
@@ -3857,13 +3857,16 @@ function SourceControlInner(): React.JSX.Element {
       if (!worktreePath || !activeWorktreeId) {
         return
       }
+      const runtimeEnvironmentId =
+        useAppStore.getState().settings?.activeRuntimeEnvironmentId?.trim() || null
       // Why: git discard replaces the working tree version of this file. Any
       // pending editor autosave must be quiesced first so it cannot recreate
       // the discarded edits after git restores the file.
       await requestEditorSaveQuiesce({
         worktreeId: activeWorktreeId,
         worktreePath,
-        relativePath: filePath
+        relativePath: filePath,
+        runtimeEnvironmentId
       })
       const connectionId = getConnectionId(activeWorktreeId ?? null) ?? undefined
       await discardRuntimeGitPath(
@@ -3878,7 +3881,8 @@ function SourceControlInner(): React.JSX.Element {
       notifyEditorExternalFileChange({
         worktreeId: activeWorktreeId,
         worktreePath,
-        relativePath: filePath
+        relativePath: filePath,
+        runtimeEnvironmentId
       })
     },
     [activeWorktreeId, worktreePath]
@@ -3889,6 +3893,8 @@ function SourceControlInner(): React.JSX.Element {
       if (!worktreePath || !activeWorktreeId) {
         return
       }
+      const runtimeEnvironmentId =
+        useAppStore.getState().settings?.activeRuntimeEnvironmentId?.trim() || null
       // Why: bulk discard replaces many working-tree files at once. Quiesce
       // any matching editor autosaves before git mutates the files so a delayed
       // save cannot recreate edits after the restore.
@@ -3897,7 +3903,8 @@ function SourceControlInner(): React.JSX.Element {
           requestEditorSaveQuiesce({
             worktreeId: activeWorktreeId,
             worktreePath,
-            relativePath
+            relativePath,
+            runtimeEnvironmentId
           })
         )
       )
@@ -3915,7 +3922,8 @@ function SourceControlInner(): React.JSX.Element {
         notifyEditorExternalFileChange({
           worktreeId: activeWorktreeId,
           worktreePath,
-          relativePath
+          relativePath,
+          runtimeEnvironmentId
         })
       }
     },
@@ -4881,8 +4889,8 @@ function SourceControlAiInstructionGuidanceButton({
       ? 'Add commit message instructions'
       : 'Add pull request instructions'
   const target = guidance.repoBacked
-    ? 'Repo Settings > Source Control AI'
-    : 'Settings > Git > Source Control AI'
+    ? 'Repo Settings > Git AI Author'
+    : 'Settings > Git > Git AI Author'
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -5606,7 +5614,7 @@ export function CommitArea({
   } else if (isCommitting) {
     generateDisabledReason = 'Commit in progress…'
   } else if (!aiAgentConfigured) {
-    generateDisabledReason = 'Pick an agent in Settings -> Git -> Source Control AI.'
+    generateDisabledReason = 'Pick an agent in Settings -> Git -> Git AI Author.'
   } else if (stagedCount === 0) {
     generateDisabledReason = 'Stage at least one file to generate a message.'
   } else if (hasMessage) {

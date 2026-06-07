@@ -18,6 +18,14 @@ export type PtyDataMeta = {
   rawLength?: number
 }
 
+export type PtyBufferSnapshot = {
+  data: string
+  cols: number
+  rows: number
+  seq?: number
+  source?: 'headless' | 'renderer'
+}
+
 export const ptyDataHandlers = new Map<string, (data: string, meta?: PtyDataMeta) => void>()
 /** Sidecar subscriptions that observe PTY data without owning the primary
  *  handler. Used by features that need to react to the live byte stream
@@ -86,29 +94,36 @@ export function ensurePtyDispatcher(): void {
   }
   ptyDispatcherAttached = true
   window.api.pty.onData((payload) => {
-    let meta: PtyDataMeta | undefined
-    if (typeof payload.seq === 'number') {
-      meta ??= {}
-      meta.seq = payload.seq
-    }
-    if (typeof payload.rawLength === 'number') {
-      meta ??= {}
-      meta.rawLength = payload.rawLength
-    }
-    ptyDataHandlers.get(payload.id)?.(payload.data, meta)
-    const sidecars = ptyDataSidecars.get(payload.id)
-    if (sidecars && sidecars.size > 0) {
-      // Why: snapshot the Set before iterating because watchers commonly
-      // unsubscribe themselves on the very chunk that satisfies them
-      // (e.g. agent-paste-draft resolves on DECSET 2004 and immediately
-      // tears down). Iterating the live Set in that case can skip a
-      // watcher or — if a watcher synchronously subscribes a sibling —
-      // double-fire. The Set is never large (one watcher per active
-      // ready-wait), so the array allocation is cheap.
-      const snapshot = Array.from(sidecars)
-      for (const watcher of snapshot) {
-        watcher(payload.data)
+    try {
+      let meta: PtyDataMeta | undefined
+      if (typeof payload.seq === 'number') {
+        meta ??= {}
+        meta.seq = payload.seq
       }
+      if (typeof payload.rawLength === 'number') {
+        meta ??= {}
+        meta.rawLength = payload.rawLength
+      }
+      ptyDataHandlers.get(payload.id)?.(payload.data, meta)
+      const sidecars = ptyDataSidecars.get(payload.id)
+      if (sidecars && sidecars.size > 0) {
+        // Why: snapshot the Set before iterating because watchers commonly
+        // unsubscribe themselves on the very chunk that satisfies them
+        // (e.g. agent-paste-draft resolves on DECSET 2004 and immediately
+        // tears down). Iterating the live Set in that case can skip a
+        // watcher or — if a watcher synchronously subscribes a sibling —
+        // double-fire. The Set is never large (one watcher per active
+        // ready-wait), so the array allocation is cheap.
+        const snapshot = Array.from(sidecars)
+        for (const watcher of snapshot) {
+          watcher(payload.data)
+        }
+      }
+    } finally {
+      // Why: main budgets renderer-bound terminal output by bytes accepted
+      // into this dispatcher. ACK in finally so a bad sidecar cannot leave
+      // a PTY permanently backpressured.
+      window.api.pty.ackData?.(payload.id, payload.rawLength ?? payload.data.length)
     }
   })
   window.api.pty.onReplay((payload) => {
@@ -323,6 +338,7 @@ export type PtyTransport = {
   ) => boolean
   isConnected: () => boolean
   getPtyId: () => string | null
+  serializeBuffer?: (opts?: { scrollbackRows?: number }) => Promise<PtyBufferSnapshot | null>
   preserve?: () => void
   /** Unregister PTY handlers without killing the process, so a remounted
    *  pane can reattach to the same running shell. */

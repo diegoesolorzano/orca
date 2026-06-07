@@ -901,6 +901,7 @@ export type PreloadApi = {
     signal: (id: string, signal: string) => void
     kill: (id: string, opts?: { keepHistory?: boolean }) => Promise<void>
     ackColdRestore: (id: string) => void
+    ackData: (id: string, charCount: number) => void
     hasChildProcesses: (id: string) => Promise<boolean>
     getForegroundProcess: (id: string) => Promise<string | null>
     getCwd: (id: string) => Promise<string>
@@ -908,7 +909,14 @@ export type PreloadApi = {
     getMainBufferSnapshot: (
       id: string,
       opts?: { scrollbackRows?: number }
-    ) => Promise<{ data: string; cols: number; rows: number; seq?: number } | null>
+    ) => Promise<{
+      data: string
+      cols: number
+      rows: number
+      cwd?: string | null
+      seq?: number
+      source?: 'headless' | 'renderer'
+    } | null>
     onData: (
       callback: (data: { id: string; data: string; seq?: number; rawLength?: number }) => void
     ) => () => void
@@ -2163,7 +2171,12 @@ export type PreloadApi = {
       callback: (data: { worktreeId: string } & RuntimeMobileSessionTabMove) => void
     ) => () => void
     onOpenFileFromMobile: (
-      callback: (data: { worktreeId: string; filePath: string; relativePath: string }) => void
+      callback: (data: {
+        worktreeId: string
+        filePath: string
+        relativePath: string
+        runtimeEnvironmentId?: string
+      }) => void
     ) => () => void
     onOpenDiffFromMobile: (
       callback: (data: {
@@ -2171,6 +2184,7 @@ export type PreloadApi = {
         filePath: string
         relativePath: string
         staged: boolean
+        runtimeEnvironmentId?: string
       }) => void
     ) => () => void
     onMobileMarkdownRequest: (

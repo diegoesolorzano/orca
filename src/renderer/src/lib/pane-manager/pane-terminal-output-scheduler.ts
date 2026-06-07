@@ -51,7 +51,9 @@ type QueueEntry = {
   backgroundBacklogDropped: boolean
   highPriority: boolean
   foregroundHold: boolean
+  foregroundHoldSafetyDelayMs: number
   foregroundCoalesce: boolean
+  foregroundCoalesceDelayMs: number
   foregroundHoldSafetyTimer: ReturnType<typeof setTimeout> | null
   foregroundCoalesceTimer: ReturnType<typeof setTimeout> | null
 }
@@ -69,6 +71,10 @@ const MAX_BACKGROUND_QUEUE_CHUNKS = 4096
 const PARSE_SETTLE_TIMEOUT_MS = 250
 const FOREGROUND_COALESCE_DELAY_MS = 1000
 const FOREGROUND_HOLD_SAFETY_DELAY_MS = 250
+// Why: key repeat can tick every 30-50ms; one frame catches split restores
+// without batching multiple typed-character redraws behind the fallback.
+const LATENCY_SENSITIVE_FOREGROUND_COALESCE_DELAY_MS = 16
+const LATENCY_SENSITIVE_FOREGROUND_HOLD_SAFETY_DELAY_MS = 32
 const CURSOR_SHOW_SEQUENCE = '\x1b[?25h'
 const CURSOR_HIDE_SEQUENCE = '\x1b[?25l'
 const SYNCHRONIZED_OUTPUT_END_SEQUENCE = '\x1b[?2026l'
@@ -179,7 +185,9 @@ function createQueueEntry(
     backgroundBacklogDropped: false,
     highPriority: true,
     foregroundHold: false,
+    foregroundHoldSafetyDelayMs: FOREGROUND_HOLD_SAFETY_DELAY_MS,
     foregroundCoalesce: false,
+    foregroundCoalesceDelayMs: FOREGROUND_COALESCE_DELAY_MS,
     foregroundHoldSafetyTimer: null,
     foregroundCoalesceTimer: null
   }
@@ -191,6 +199,7 @@ function clearForegroundHoldSafety(entry: QueueEntry): void {
   }
   clearTimeout(entry.foregroundHoldSafetyTimer)
   entry.foregroundHoldSafetyTimer = null
+  entry.foregroundHoldSafetyDelayMs = FOREGROUND_HOLD_SAFETY_DELAY_MS
 }
 
 function clearForegroundCoalesce(entry: QueueEntry): void {
@@ -199,6 +208,7 @@ function clearForegroundCoalesce(entry: QueueEntry): void {
     entry.foregroundCoalesceTimer = null
   }
   entry.foregroundCoalesce = false
+  entry.foregroundCoalesceDelayMs = FOREGROUND_COALESCE_DELAY_MS
 }
 
 function scheduleForegroundHoldSafety(entry: QueueEntry): void {
@@ -210,13 +220,20 @@ function scheduleForegroundHoldSafety(entry: QueueEntry): void {
     if (queuedByTerminal.has(entry.terminal)) {
       scheduleDrain(0)
     }
-  }, FOREGROUND_HOLD_SAFETY_DELAY_MS)
+  }, entry.foregroundHoldSafetyDelayMs)
 }
 
-function scheduleForegroundCoalesceRelease(entry: QueueEntry): void {
+function scheduleForegroundCoalesceRelease(
+  entry: QueueEntry,
+  options?: { rescheduleEarlier?: boolean }
+): void {
   if (entry.foregroundCoalesceTimer !== null) {
-    entry.foregroundCoalesce = true
-    return
+    if (options?.rescheduleEarlier !== true) {
+      entry.foregroundCoalesce = true
+      return
+    }
+    clearTimeout(entry.foregroundCoalesceTimer)
+    entry.foregroundCoalesceTimer = null
   }
   entry.foregroundCoalesce = true
   entry.foregroundCoalesceTimer = setTimeout(() => {
@@ -225,7 +242,7 @@ function scheduleForegroundCoalesceRelease(entry: QueueEntry): void {
     if (queuedByTerminal.has(entry.terminal)) {
       scheduleDrain(0)
     }
-  }, FOREGROUND_COALESCE_DELAY_MS)
+  }, entry.foregroundCoalesceDelayMs)
 }
 
 function isEntryDrainable(entry: QueueEntry): boolean {
@@ -284,6 +301,32 @@ function containsDrainableCursorRestore(data: string): boolean {
   return containsCursorRestore(
     data.slice(synchronizedEndIndex + SYNCHRONIZED_OUTPUT_END_SEQUENCE.length)
   )
+}
+
+function previewQueuedData(entry: QueueEntry, limit: number): string {
+  let data = ''
+  for (let index = entry.chunkIndex; index < entry.chunks.length; index += 1) {
+    const chunk = entry.chunks[index]
+    const remaining = limit - data.length
+    if (remaining <= 0) {
+      break
+    }
+    data += chunk.data.slice(0, remaining)
+  }
+  return data
+}
+
+function coalescedQueuedDataNeedsCursorRestore(entry: QueueEntry): boolean {
+  const data = previewQueuedData(entry, SYNC_FOREGROUND_FLUSH_CHARS)
+  const synchronizedEndIndex = data.lastIndexOf(SYNCHRONIZED_OUTPUT_END_SEQUENCE)
+  if (synchronizedEndIndex === -1) {
+    return false
+  }
+  const synchronizedFrame = data.slice(
+    0,
+    synchronizedEndIndex + SYNCHRONIZED_OUTPUT_END_SEQUENCE.length
+  )
+  return containsCursorRestore(synchronizedFrame) && !containsDrainableCursorRestore(data)
 }
 
 function takeQueuedChunk(entry: QueueEntry, limit: number): QueuedWrite | null {
@@ -539,6 +582,17 @@ export function writeTerminalOutput(
       if (options.holdForeground) {
         // Why: synchronized-output start/body chunks contain transient cursor
         // moves. Holding them prevents Chromium from rasterizing those states.
+        if (options.latencySensitive === true) {
+          // Why: Codex composer redraws can split the end marker from the
+          // input-triggered frame; keep cursor protection without adding a
+          // human-visible fallback delay to typed characters.
+          queued.foregroundHoldSafetyDelayMs = Math.min(
+            queued.foregroundHoldSafetyDelayMs,
+            LATENCY_SENSITIVE_FOREGROUND_HOLD_SAFETY_DELAY_MS
+          )
+        } else if (!queued.foregroundHold) {
+          queued.foregroundHoldSafetyDelayMs = FOREGROUND_HOLD_SAFETY_DELAY_MS
+        }
         queued.foregroundHold = true
         clearForegroundCoalesce(queued)
         scheduleForegroundHoldSafety(queued)
@@ -547,7 +601,19 @@ export function writeTerminalOutput(
       if (options.coalesceForeground || queued.foregroundCoalesce) {
         queued.foregroundHold = false
         clearForegroundHoldSafety(queued)
-        if (containsDrainableCursorRestore(data)) {
+        const shouldShortenCoalesceForLatencySensitiveForeground = options.latencySensitive === true
+        if (shouldShortenCoalesceForLatencySensitiveForeground) {
+          // Why: user input echo must not inherit the normal synchronized-frame
+          // restore fallback; wait briefly for the restore, then paint.
+          queued.foregroundCoalesceDelayMs = Math.min(
+            queued.foregroundCoalesceDelayMs,
+            LATENCY_SENSITIVE_FOREGROUND_COALESCE_DELAY_MS
+          )
+        }
+        const shouldDrainForLatencySensitiveForeground =
+          shouldShortenCoalesceForLatencySensitiveForeground &&
+          !coalescedQueuedDataNeedsCursorRestore(queued)
+        if (containsDrainableCursorRestore(data) || shouldDrainForLatencySensitiveForeground) {
           clearForegroundCoalesce(queued)
           scheduleDrain(0)
           return
@@ -555,7 +621,9 @@ export function writeTerminalOutput(
         // Why: TUI synchronized-output end markers can be split from the
         // immediate cursor-restoring bytes by the PTY transport. Wait only
         // until the restore arrives; the timer is a bounded fallback.
-        scheduleForegroundCoalesceRelease(queued)
+        scheduleForegroundCoalesceRelease(queued, {
+          rescheduleEarlier: shouldShortenCoalesceForLatencySensitiveForeground
+        })
         return
       }
       queued.foregroundHold = false
