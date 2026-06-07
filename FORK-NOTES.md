@@ -73,12 +73,15 @@ open -a Orca
 
 ## Consideraciones del build propio
 
-- **Auto-updater: PELIGRO, no "sin auto-updates".** Verificado 2026-06-07: el build
-  del fork SI recibe el feed de updates oficial de Stably y muestra el popup
-  "Update Available". Aceptarlo REEMPLAZA el build del fork por el binario oficial
-  (se pierden los parches locales). Regla: SIEMPRE descartar ese popup; actualizar
-  solo via el flujo de abajo (skill `orca-fork-update`). Pendiente: neutralizar el
-  publish feed en la config del builder (ver `docs-fork/001-product-ideas.md` §003).
+- **Auto-updater: neutralizado a nivel UI (parche del fork).** El build del fork SI
+  recibe el feed de updates oficial de Stably y muestra la tarjeta "Update
+  Available" — se conserva a proposito como NOTIFICACION de releases upstream, pero
+  el boton de instalar fue removido (commit `feat(fork): disable in-app update
+  install...` en `UpdateCard.tsx`): instalarlo reemplazaria el build del fork por el
+  binario oficial y se perderian los parches locales. Actualizar SIEMPRE via el
+  flujo de abajo (skill `orca-fork-update`). Nota: Settings puede conservar su
+  propio boton de update — no usarlo. Neutralizacion del feed a nivel builder:
+  pendiente en `docs-fork/001-product-ideas.md` §003 (Chiwi nivel 1).
 - **Sin firma/notarizacion de Stably**: primera apertura puede requerir aprobacion en
   Ajustes → Privacidad y Seguridad (por eso el `xattr -dr com.apple.quarantine`).
 - **Version**: el build hereda la version del package.json upstream al momento del merge
