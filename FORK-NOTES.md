@@ -73,8 +73,12 @@ open -a Orca
 
 ## Consideraciones del build propio
 
-- **Sin auto-updates**: el build del fork no recibe actualizaciones; hay que actualizar
-  manualmente (ver flujo abajo).
+- **Auto-updater: PELIGRO, no "sin auto-updates".** Verificado 2026-06-07: el build
+  del fork SI recibe el feed de updates oficial de Stably y muestra el popup
+  "Update Available". Aceptarlo REEMPLAZA el build del fork por el binario oficial
+  (se pierden los parches locales). Regla: SIEMPRE descartar ese popup; actualizar
+  solo via el flujo de abajo (skill `orca-fork-update`). Pendiente: neutralizar el
+  publish feed en la config del builder (ver `docs-fork/001-product-ideas.md` §003).
 - **Sin firma/notarizacion de Stably**: primera apertura puede requerir aprobacion en
   Ajustes → Privacidad y Seguridad (por eso el `xattr -dr com.apple.quarantine`).
 - **Version**: el build hereda la version del package.json upstream al momento del merge
