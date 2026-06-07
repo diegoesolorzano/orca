@@ -574,7 +574,6 @@ export function UpdateCard() {
           mediaLoaded={mediaLoaded}
           onMediaError={() => setMediaFailed(true)}
           onMediaLoad={() => setMediaLoaded(true)}
-          onUpdate={handleUpdate}
           onClose={handleDismissWithAnimation}
         />
       )
@@ -584,7 +583,6 @@ export function UpdateCard() {
       <SimpleCardContent
         version={status.version}
         releaseUrl={releaseUrl}
-        onUpdate={handleUpdate}
         onClose={handleDismissWithAnimation}
       />
     )
@@ -646,7 +644,6 @@ function RichCardContent({
   mediaLoaded,
   onMediaError,
   onMediaLoad,
-  onUpdate,
   onClose
 }: {
   release: NonNullable<ChangelogData['release']>
@@ -656,7 +653,6 @@ function RichCardContent({
   mediaLoaded: boolean
   onMediaError: () => void
   onMediaLoad: () => void
-  onUpdate: () => void
   onClose: () => void
 }) {
   const showMedia =
@@ -724,9 +720,24 @@ function RichCardContent({
         Read the full release notes
       </button>
 
-      <Button variant="default" size="sm" onClick={onUpdate} className="w-full cursor-pointer">
-        Update
-      </Button>
+      <ForkUpdateNotice />
+    </div>
+  )
+}
+
+// ── Fork update notice ───────────────────────────────────────────────
+
+// Fork patch: the in-app updater installs the OFFICIAL Stably binary, which
+// would replace this fork build and drop its local patches. The card stays as
+// an upstream-release notification, but the install action is removed —
+// updates go through the fork flow (merge upstream + rebuild) instead.
+function ForkUpdateNotice() {
+  return (
+    <div className="mt-0.5 rounded-md border border-border/70 bg-muted/30 px-3 py-2">
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        Fork build: in-app updates are disabled — installing the official release would drop the
+        local patches. Update by merging upstream and rebuilding (<code>orca-fork-update</code>).
+      </p>
     </div>
   )
 }
@@ -736,12 +747,10 @@ function RichCardContent({
 function SimpleCardContent({
   version,
   releaseUrl,
-  onUpdate,
   onClose
 }: {
   version: string
   releaseUrl: string
-  onUpdate: () => void
   onClose: () => void
 }) {
   return (
@@ -772,14 +781,7 @@ function SimpleCardContent({
         Release notes
       </button>
 
-      <Button
-        variant="default"
-        size="sm"
-        onClick={onUpdate}
-        className="mt-0.5 w-full cursor-pointer"
-      >
-        Update
-      </Button>
+      <ForkUpdateNotice />
     </div>
   )
 }
