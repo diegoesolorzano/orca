@@ -56,6 +56,13 @@ en sesion 2026-06-05, sin resolver):
   `package.json`/config de electron-builder + iconos (`.icns`/`.png`). El .app,
   Dock, menu y About muestran Chiwi. Pendiente del usuario: el icono. Conflictos
   de merge con upstream: triviales (2-3 archivos).
+- **Nivel 1 DEBE incluir: neutralizar el auto-updater.** Verificado 2026-06-07: el
+  build del fork SI recibe el feed de updates oficial de Stably (popup "Update
+  Available" v1.4.51-rc.4) — un clic en Update reemplaza el build del fork por el
+  oficial y se pierden los parches locales. Quitar/redirigir el publish feed
+  (electron-updater / app-update.yml) en la config del builder. Mientras tanto:
+  regla operativa = SIEMPRE descartar ese popup; updates solo via skill
+  `orca-fork-update`.
 - **Nivel 2 (proyecto aparte):** strings de UI, bundle ID `com.stablyai.orca`
   (cambiarlo SEPARA los datos de app en `~/Library/Application Support/`), CLI
   `orca`, rutas `~/.orca/`, deep links. Es el rebrand de producto completo.
