@@ -35,6 +35,25 @@ function refreshTerminalAfterWebglAttach(pane: ManagedPaneInternal): void {
   }
 }
 
+// Why: the WebGL glyph atlas can corrupt on rapid TUI/spinner redraw without a
+// context-loss event (issue #5031), and nothing recovers it until the pane is
+// hidden+shown. Clearing the atlas rebuilds it lazily; refresh repaints. Both are
+// best-effort — a disposed pane or a GPU quirk must not throw to the caller.
+export function redrawPane(pane: ManagedPaneInternal): void {
+  if (pane.webglAddon) {
+    try {
+      pane.webglAddon.clearTextureAtlas()
+    } catch {
+      /* ignore — clearTextureAtlas can be a no-op or unavailable on some GPUs */
+    }
+  }
+  try {
+    pane.terminal.refresh(0, pane.terminal.rows - 1)
+  } catch {
+    /* ignore — pane may have been disposed in the meantime */
+  }
+}
+
 export function cancelPendingWebglRefresh(pane: ManagedPaneInternal): void {
   if (pane.pendingWebglRefreshRafId != null) {
     cancelAnimationFrame(pane.pendingWebglRefreshRafId)

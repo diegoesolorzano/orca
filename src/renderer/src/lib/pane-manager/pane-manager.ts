@@ -30,6 +30,7 @@ import { applyTerminalGpuAcceleration } from './pane-terminal-gpu-acceleration'
 import { rebuildAttachedWebgl } from './pane-webgl-reattach'
 import {
   markPaneComplexScriptOutput,
+  redrawPaneById,
   resumePaneRendering,
   setPaneGpuRenderingState,
   suspendPaneRendering
@@ -258,6 +259,17 @@ export class PaneManager {
 
   markPaneHasComplexScriptOutput(paneId: number): void {
     markPaneComplexScriptOutput(this.panes, paneId)
+  }
+
+  redrawPane(paneId: number): void {
+    redrawPaneById(this.panes, paneId)
+  }
+
+  redrawActivePane(): void {
+    const pane = this.getActivePane() ?? this.getPanes()[0]
+    if (pane) {
+      this.redrawPane(pane.id)
+    }
   }
 
   rebuildPaneWebgl(paneId: number): void {
