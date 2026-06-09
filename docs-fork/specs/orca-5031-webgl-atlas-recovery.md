@@ -10,9 +10,13 @@
 > Ubicacion no canonica deliberada: la regla del fork prohibe escribir en `docs/`
 > (pertenece a upstream), por eso este spec vive en `docs-fork/specs/`.
 
-> Decisiones cerradas (usuario, 2026-06-09): atajo por defecto **`Mod+Alt+R`**;
-> auto-limpieza al recuperar foco (FR-4) **INCLUIDA en v1**; listar en la paleta de
-> comandos **si existe** (a verificar en el plan).
+> Decisiones cerradas (usuario, 2026-06-09; ajustadas tras review cross-model r1):
+> atajo por defecto **`Mod+Alt+L`** (el `Mod+Alt+R` propuesto choca con
+> `workspace.rename` en macOS; `Mod+Alt+L` esta verificado libre en darwin/linux/
+> win32); auto-limpieza al recuperar foco (FR-4) **INCLUIDA en v1, incondicional**;
+> paleta de comandos **FUERA de v1** — la unica paleta de Orca (Cmd+J) es de acciones
+> de workspace, no un command palette generico; la descubribilidad va por Settings →
+> Shortcuts.
 
 ## Problem Statement
 
@@ -51,25 +55,45 @@ equivalente.
   WebGL (`clearTextureAtlas()`) y fuerza `refresh(0, rows-1)`.
 - [ ] FR-2: El comando funciona aunque el pane este en DOM (sin WebGL): solo hace
   `refresh`, sin error.
-- [ ] FR-3: Atajo de teclado configurable (accion nueva en el registro de keybindings)
-  + descubrible en Settings → Shortcuts.
-- [ ] FR-4: (Opcional v1, ver Open Questions) auto-limpieza del atlas al recuperar
-  foco/visibilidad de un pane WebGL — seguro de vida pasivo.
-- [ ] FR-5: No-op seguro: si no hay pane activo o el addon fue dispuesto, no lanza.
+- [ ] FR-3: Atajo de teclado configurable — accion nueva `terminal.redraw` en el
+  registro de keybindings con default `Mod+Alt+L` (libre en las 3 plataformas),
+  `allowInTerminal: true`, descubrible/reasignable en Settings → Shortcuts.
+- [ ] FR-4: Auto-limpieza del atlas al recuperar foreground un pane WebGL (incondicional
+  en v1). Disparo PRECISO: solo en la transicion a foreground de tab/pane — el mismo
+  punto que ya re-adjunta WebGL al volver a primer plano (`reattachWebglIfNeeded`/
+  resume), NO en cada evento `focus`/`focusin` del DOM. Idempotente: un flag por pane
+  evita repetir si no hubo transicion real.
+- [ ] FR-5: Routing del comando definido: solo actua si el tab activo es de terminal
+  (`activeTabType === 'terminal'`) con un `PaneManager` montado y un pane activo
+  (`getActivePane()`); en cualquier otro caso (editor/browser/sin pane) es no-op
+  silencioso. Nunca lanza si el addon fue dispuesto.
 
 ## Acceptance Criteria
 
-- **Given** un pane WebGL con el atlas corrupto, **When** el usuario invoca "Redraw
-  terminal" (atajo o paleta), **Then** el atlas se limpia y el contenido se repinta
-  correcto sin cambiar de tab.
-- **Given** un pane en renderer DOM, **When** se invoca el comando, **Then** hace
-  `refresh` y no llama `clearTextureAtlas` (no existe addon) ni lanza.
-- **Given** ningun pane activo (editor/browser enfocado), **When** se invoca el comando
-  desde la paleta, **Then** no-op silencioso.
-- **Given** el atajo nuevo, **When** el usuario lo busca en Settings → Shortcuts,
-  **Then** aparece con titulo y grupo, y es re-asignable.
-- **(si FR-4)** **Given** un pane WebGL que recupera foco/visibilidad, **When** vuelve
-  a primer plano, **Then** se limpia el atlas una vez (sin loop, sin parpadeo).
+Unidades verificables en test (la "corrupción del atlas" real no se sintetiza en unit;
+se valida que se invocan las primitivas correctas + protocolo manual abajo):
+
+- **Given** un pane WebGL (addon presente), **When** se invoca `redrawPane`, **Then**
+  se llama `webglAddon.clearTextureAtlas()` y luego `terminal.refresh(0, rows-1)`.
+- **Given** un pane en renderer DOM (sin addon), **When** se invoca `redrawPane`,
+  **Then** se llama `refresh` y NO `clearTextureAtlas`, sin lanzar.
+- **Given** un addon cuyo `clearTextureAtlas` lanza, **When** se invoca `redrawPane`,
+  **Then** el error se traga y `refresh` igual corre (best-effort).
+- **Given** el tab activo NO es de terminal (editor/browser), **When** se invoca
+  `redrawActivePane`, **Then** no-op silencioso (no toca ningun pane).
+- **Given** el tab activo es de terminal sin pane activo, **When** se invoca, **Then**
+  no-op silencioso.
+- **Given** el atajo `Mod+Alt+L`, **When** el usuario lo busca en Settings → Shortcuts,
+  **Then** aparece con titulo "Redraw terminal" y grupo, y es re-asignable.
+- **(FR-4)** **Given** un pane WebGL que transiciona a foreground, **When** vuelve a
+  primer plano, **Then** se llama `clearTextureAtlas` exactamente una vez por
+  transicion (un segundo foreground sin transicion intermedia NO repite).
+
+### Protocolo de reproduccion manual (obligatorio antes de cerrar)
+
+1. Correr un agente con spinner (Claude Code) en un pane hasta ver glifos corruptos.
+2. Invocar el atajo → el pane se repinta correcto sin cambiar de tab.
+3. Repetir corrupción y cambiar a otro tab y volver → FR-4 lo repinta solo.
 
 ## Scope
 
@@ -84,25 +108,33 @@ equivalente.
 
 ### Renderer — comando / atajo
 - [ ] `src/shared/keybindings.ts` — accion nueva `terminal.redraw` (titulo "Redraw
-  terminal", grupo Terminal/Tabs, `allowInTerminal: true`, default binding — ver Open
-  Questions).
-- [ ] Handler en el dispatcher de shortcuts (`Terminal.tsx` o `TerminalPane.tsx`,
-  donde vive el `manager`): al matchear `terminal.redraw`, llamar
-  `manager.redrawActivePane()`.
-- [ ] (Paleta de comandos: si existe un registro Cmd-J/quick-actions que liste
-  acciones, añadir la entrada — verificar en plan.)
+  terminal", grupo Terminal, `allowInTerminal: true`, default
+  `platformBindings(['Mod+Alt+L'])`).
+- [ ] Handler en el dispatcher de shortcuts (`Terminal.tsx`, donde se resuelve
+  `keybindingMatchesAction` y se accede al `manager`): al matchear `terminal.redraw`,
+  `e.preventDefault()` + `manager.redrawActivePane()`. Verificar en el plan si la
+  accion necesita entrada en `terminal-shortcut-policy.ts` (`resolveTerminalShortcutAction`)
+  por ser scope terminal.
+- [ ] Paleta de comandos: **fuera de v1** (la Cmd+J es de acciones de workspace; mal
+  fit para un redraw de pane). Descubribilidad por Settings → Shortcuts.
 
-### Renderer — auto-recuperacion (si FR-4 entra)
-- [ ] Gancho en el path de foco/visibilidad del pane (reuso del lugar que ya llama
-  `reattachWebglIfNeeded`/`refresh` al volver a foreground) → `clearTextureAtlas` una
-  sola vez por transicion.
+### Renderer — auto-recuperacion (FR-4, en v1)
+- [ ] Gancho en la transicion a foreground del pane — reuso del punto que ya llama
+  `reattachWebglIfNeeded`/`refresh` al volver a primer plano (`pane-rendering-control.ts`
+  `resumePaneRendering`/ruta equivalente). Limpiar el atlas (`clearTextureAtlas`) una
+  sola vez por transicion, gated por un flag por pane; NO enganchar a eventos `focus`
+  del DOM.
 
 ### Testing
 - [ ] Unit: `redrawPane` con addon presente (llama clear+refresh), sin addon (solo
-  refresh), con addon que lanza (no propaga).
-- [ ] Unit: `redrawActivePane` sin pane activo → no-op.
-- [ ] Unit: la accion `terminal.redraw` existe en el registro con default binding.
-- [ ] (si FR-4) Unit del gancho de foco: limpia una vez, no en loop.
+  refresh), con addon cuyo clear lanza (traga error, igual hace refresh).
+- [ ] Unit: `redrawActivePane` — sin pane activo → no-op; tab no-terminal → no-op.
+- [ ] Unit: la accion `terminal.redraw` existe en el registro con default `Mod+Alt+L`
+  y `allowInTerminal`.
+- [ ] Unit: FR-4 — el gancho de foreground limpia una vez por transicion; segundo
+  foreground sin transicion intermedia no repite (flag idempotente).
+- [ ] Unit: si se implementa como accion terminal-scoped, `resolveTerminalShortcutAction`
+  resuelve `terminal.redraw` correctamente.
 
 ## Design Decisions
 
@@ -162,9 +194,21 @@ equivalente.
 
 ## Open Questions
 
-(Resueltas por el usuario 2026-06-09 — ver bloque bajo el header)
+Ninguna abierta. Resoluciones (usuario 2026-06-09 + ajuste por review cross-model r1):
+1. **Atajo por defecto:** `Mod+Alt+L` (el `Mod+Alt+R` propuesto chocaba con
+   `workspace.rename` en macOS). ✅
+2. **FR-4 (auto-on-focus):** incluida en v1, incondicional, gated a transicion de
+   foreground. ✅
+3. **Paleta de comandos:** fuera de v1 (Cmd+J es workspace-scoped, mal fit);
+   descubribilidad por Settings → Shortcuts. ✅
 
-1. **Atajo por defecto:** `Mod+Alt+R`. ✅
-2. **FR-4 (auto-on-focus):** incluida en v1. ✅
-3. **Paleta de comandos:** sí, listar "Redraw terminal" si existe el registro
-   (verificar en plan). ✅
+## Review Notes
+
+- 2026-06-09 · spec-reviewer (cross-model) · round 1 · REQUEST_CHANGES · incorporate-and-stop · `.claude/reviews/orca-5031-webgl-atlas-recovery-r1.md`
+  - [CRITICAL] colision `Mod+Alt+R`/`workspace.rename` (darwin) → cambiado a `Mod+Alt+L` (verificado libre).
+  - [W] FR-4 con wording condicional contradictorio → ahora incondicional en v1.
+  - [W] paleta ambigua → fuera de v1 (Cmd+J es workspace-scoped).
+  - [W] routing "sin pane activo" → definido por `activeTabType==='terminal'` + PaneManager montado + `getActivePane()`.
+  - [W] transicion de auto-clear imprecisa → solo foreground de tab/pane, idempotente por flag, no eventos `focus` del DOM.
+  - [W] aceptacion no automatable → dividida en unidades verificables (clear/refresh/errores) + protocolo manual.
+  - [I] confirmado: no ampliar rangos complex-script; añadir test de `resolveTerminalShortcutAction` si la accion es terminal-scoped.
