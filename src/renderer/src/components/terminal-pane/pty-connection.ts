@@ -17,8 +17,8 @@ import type { PtyConnectionDeps } from './pty-connection-types'
 import { safeFit } from '@/lib/pane-manager/pane-tree-ops'
 import { getFitOverrideForPty, bindPanePtyId } from '@/lib/pane-manager/mobile-fit-overrides'
 import { isPtyLocked } from '@/lib/pane-manager/mobile-driver-state'
-import { isPaneReplaying, replayIntoTerminal } from './replay-guard'
-import { terminalOutputPrefersDomRenderer } from '@/lib/pane-manager/terminal-complex-script'
+import { isPaneReplaying, replayIntoTerminal, replayIntoTerminalAsync } from './replay-guard'
+import { terminalOutputPrefersRenderRefresh } from '@/lib/pane-manager/terminal-complex-script'
 import {
   PANE_PTY_RESIZE_HOLD_FLUSH_EVENT,
   queuePanePtyResizeIfHeld,
@@ -77,6 +77,10 @@ import { createCommandCodeOutputStatusDetector } from './command-code-output-sta
 import type { PtyDataMeta } from './pty-dispatcher'
 import { createTerminalGitHubPRLinkDetector } from '@/lib/terminal-github-pr-link-detector'
 import { installConptyDeviceAttributesHandler } from './terminal-conpty-device-attributes'
+import {
+  cancelScheduledHiddenOutputRestore,
+  scheduleHiddenOutputRestore
+} from './hidden-output-restore-scheduler'
 
 const pendingSpawnByPaneKey = new Map<string, Promise<string | null>>()
 const SSH_SESSION_EXPIRED_ERROR = 'SSH_SESSION_EXPIRED'
@@ -891,11 +895,14 @@ export function connectPanePty(
   })
   commandLifecycle.attachXtermConsumer(pane.terminal)
   const onTerminalKeyDown = (event: KeyboardEvent): void => {
-    deps.clearTerminalTabUnread(deps.tabId)
-    deps.clearTerminalPaneUnread(cacheKey)
-    deps.clearWorktreeUnread(deps.worktreeId)
     if (isPlainEscapeKeyEvent(event)) {
       setPendingTerminalInputIntent('plain-escape')
+      // Why: plain Escape produces real terminal input (\x1b), so it is a
+      // genuine "user is here" signal and must still dismiss attention before
+      // the early return for interrupt-intent inference.
+      deps.clearTerminalTabUnread(deps.tabId)
+      deps.clearTerminalPaneUnread(cacheKey)
+      deps.clearWorktreeUnread(deps.worktreeId)
       return
     }
     if (isCtrlCKeyEvent(event)) {
@@ -904,6 +911,30 @@ export function connectPanePty(
       }
       setPendingTerminalInputIntent('ctrl-c')
     }
+    // Why: only treat keydowns that will produce real terminal input as the
+    // "user is here" signal. Modifier-only presses, autorepeat, and Cmd/Ctrl+C
+    // copy chords with an active selection must not dismiss attention on a
+    // sibling pane before the user has seen it.
+    if (
+      event.repeat ||
+      event.key === 'Alt' ||
+      event.key === 'AltGraph' ||
+      event.key === 'Control' ||
+      event.key === 'Meta' ||
+      event.key === 'Shift'
+    ) {
+      return
+    }
+    if (
+      (event.metaKey || event.ctrlKey) &&
+      event.key.toLowerCase() === 'c' &&
+      pane.terminal.hasSelection()
+    ) {
+      return
+    }
+    deps.clearTerminalTabUnread(deps.tabId)
+    deps.clearTerminalPaneUnread(cacheKey)
+    deps.clearWorktreeUnread(deps.worktreeId)
   }
   // Why: infer only from focused xterm key events. Raw PTY bytes cannot
   // distinguish plain Escape from Alt/meta sequences, and programmatic writes
@@ -1610,7 +1641,9 @@ export function connectPanePty(
     if (!proposed || proposed.cols <= 0 || proposed.rows <= 0) {
       return
     }
-    if (!isRemoteRuntimePtyId(currentPtyId)) {
+    if (isRemoteRuntimePtyId(currentPtyId)) {
+      transport.resize(proposed.cols, proposed.rows)
+    } else {
       window.api.pty.reportGeometry(currentPtyId, proposed.cols, proposed.rows)
     }
   }
@@ -1772,19 +1805,7 @@ export function connectPanePty(
       pendingSpawnByPaneKey.set(pendingSpawnKey, trackedPromise)
     }
 
-    let rendererRiskScanTail = ''
     let foregroundRefreshRiskScanTail = ''
-
-    function terminalOutputChunkPrefersDomRenderer(data: string): boolean {
-      if (!data) {
-        return false
-      }
-      // Why: PTY chunk boundaries can split ASCII SGR sequences; keep a small
-      // tail so Codex background-color redraws still trigger the DOM fallback.
-      const scanData = rendererRiskScanTail ? `${rendererRiskScanTail}${data}` : data
-      rendererRiskScanTail = scanData.slice(-TERMINAL_RENDERER_RISK_SCAN_TAIL_CHARS)
-      return terminalOutputPrefersDomRenderer(scanData)
-    }
 
     function trailingIncompleteCsiSequence(data: string): string {
       const escapeIndex = data.lastIndexOf('\x1b[')
@@ -1809,7 +1830,7 @@ export function connectPanePty(
         ? `${foregroundRefreshRiskScanTail}${data}`
         : data
       const prefersRefresh =
-        scanData.includes('\x1b[') && terminalOutputPrefersDomRenderer(scanData)
+        scanData.includes('\x1b[') && terminalOutputPrefersRenderRefresh(scanData)
       foregroundRefreshRiskScanTail = trailingIncompleteCsiSequence(scanData)
       return prefersRefresh
     }
@@ -1822,19 +1843,32 @@ export function connectPanePty(
       // Why: drain any queued background bytes BEFORE the replay paint, so the
       // scheduler's deferred drain cannot land older bytes on top of the replay.
       flushTerminalOutput(pane.terminal)
-      if (terminalOutputChunkPrefersDomRenderer(data)) {
-        manager.markPaneHasComplexScriptOutput(pane.id)
-      }
       replayIntoTerminal(pane, deps.replayingPanesRef, data)
     }
 
+    const writeReplayDataAsync = (data: string): Promise<void> => {
+      // Why: WebGL must be rebuilt after xterm has parsed replay bytes, not
+      // merely after the write was queued.
+      flushTerminalOutput(pane.terminal)
+      return replayIntoTerminalAsync(pane, deps.replayingPanesRef, data)
+    }
+
     const replayDataCallback = (data: string): void => {
-      // Relay replay buffer holds the last 100 KB of output, which may
-      // overlap with content already rendered in xterm before the
-      // disconnect. Clear first to prevent duplication on SSH reconnect.
-      writeReplayData('\x1b[2J\x1b[3J\x1b[H')
-      writeReplayData(data)
-      writeReplayData(POST_REPLAY_REATTACH_RESET)
+      void (async () => {
+        // Relay replay buffer holds the last 100 KB of output, which may
+        // overlap with content already rendered in xterm before the
+        // disconnect. Clear first to prevent duplication on SSH reconnect.
+        await writeReplayDataAsync('\x1b[2J\x1b[3J\x1b[H')
+        await writeReplayDataAsync(data)
+        await writeReplayDataAsync(POST_REPLAY_REATTACH_RESET)
+        if (disposed) {
+          return
+        }
+        // Why: remote-runtime snapshots can arrive after WebGL attached to an
+        // empty buffer; rebuilding after replay parses seeds the glyph atlas
+        // from the now-populated xterm state.
+        manager.rebuildPaneWebgl(pane.id)
+      })()
     }
 
     type PendingHiddenOutputRestoreChunk = {
@@ -1850,6 +1884,7 @@ export function connectPanePty(
     let hiddenOutputRestorePendingOverflow = false
     let hiddenOutputRestoreFreshSnapshotNeeded = false
     let hiddenOutputRestoreRetryDeferred = false
+    let hiddenOutputRestoreScheduled = false
     let hiddenOutputRestoreDeferredRetryTimer: ReturnType<typeof setTimeout> | null = null
     let hiddenOutputRestoreDeferredRetryAttempts = 0
     // Why: hidden recovery state belongs to one PTY stream. Reattach/restart
@@ -1916,13 +1951,7 @@ export function connectPanePty(
       transport.sendInput(mode2031SequenceFor(mode))
       recordHiddenMode2031Reply()
     }
-    function beforeTerminalOutputWrite(chunk: string): void {
-      // Why: hidden tab output is coalesced by the scheduler. Run per-byte
-      // renderer checks at the xterm write boundary so background PTY bursts
-      // do not spend foreground event-loop time scanning bytes we will delay.
-      if (terminalOutputChunkPrefersDomRenderer(chunk)) {
-        manager.markPaneHasComplexScriptOutput(pane.id)
-      }
+    function beforeTerminalOutputWrite(): void {
       recordTerminalOutput(pane.terminal)
     }
 
@@ -2093,13 +2122,14 @@ export function connectPanePty(
       }
     }
 
-    function shouldSkipHiddenRendererOutput(foreground: boolean): boolean {
-      return (
-        !foreground &&
-        !deps.isVisibleRef.current &&
-        canUseHiddenOutputSnapshot(transport.getPtyId()) &&
-        !isHiddenStartupRendererQueryWindowActive()
-      )
+    function shouldSkipHiddenRendererOutput(foreground: boolean, data: string): boolean {
+      void foreground
+      void data
+      // Why: release correctness beats the hidden-output perf optimization.
+      // Real OpenCode tables still corrupt after workspace switching when PTY
+      // bytes bypass the renderer, so keep hidden panes on the live xterm path
+      // and leave snapshot skipping for a later perf branch.
+      return false
     }
 
     function skipHiddenRendererOutput(data: string): void {
@@ -2204,6 +2234,8 @@ export function connectPanePty(
       hiddenOutputRestorePendingOverflow = false
       hiddenOutputRestoreFreshSnapshotNeeded = false
       hiddenOutputRestoreRetryDeferred = false
+      hiddenOutputRestoreScheduled = false
+      cancelScheduledHiddenOutputRestore(pane.terminal)
       clearHiddenOutputRestoreDeferredRetryTimer()
       hiddenOutputRestoreDeferredRetryAttempts = 0
     }
@@ -2334,7 +2366,7 @@ export function connectPanePty(
       restoreScrollStateAfterSnapshotReplay(scrollState)
     }
 
-    function requestHiddenOutputRestoreIfNeeded(): boolean {
+    function requestHiddenOutputRestoreIfNeeded(opts?: { bypassScheduler?: boolean }): boolean {
       resetHiddenOutputRestoreIfPtyChanged()
       const ptyId = hiddenOutputRestorePtyId ?? transport.getPtyId()
       if (!hiddenOutputRestoreNeeded && hiddenOutputRestorePendingChunks.length === 0) {
@@ -2346,6 +2378,41 @@ export function connectPanePty(
       hiddenOutputRestorePtyId = ptyId
       if (hiddenOutputRestoreInFlight) {
         return true
+      }
+      if (!opts?.bypassScheduler) {
+        const priority = isActiveSplitPane() ? 'active' : 'inactive'
+        if (priority === 'inactive') {
+          if (!hiddenOutputRestoreScheduled) {
+            hiddenOutputRestoreScheduled = true
+            const scheduledPtyId = ptyId
+            const scheduledGeneration = hiddenOutputRestoreGeneration
+            // Why: tab/worktree resume can make many split panes visible at once.
+            // Restore the focused pane immediately and spread inactive replays
+            // across frames so xterm scrollback replay does not block return.
+            scheduleHiddenOutputRestore(
+              pane.terminal,
+              () => {
+                hiddenOutputRestoreScheduled = false
+                if (
+                  disposed ||
+                  hiddenOutputRestoreGeneration !== scheduledGeneration ||
+                  hiddenOutputRestorePtyId !== scheduledPtyId ||
+                  transport.getPtyId() !== scheduledPtyId ||
+                  !canUseHiddenOutputSnapshot(scheduledPtyId) ||
+                  (!hiddenOutputRestoreNeeded && hiddenOutputRestorePendingChunks.length === 0) ||
+                  !shouldWritePtyOutputForeground(deps.isVisibleRef.current)
+                ) {
+                  return
+                }
+                requestHiddenOutputRestoreIfNeeded({ bypassScheduler: true })
+              },
+              priority
+            )
+          }
+          return true
+        }
+        cancelScheduledHiddenOutputRestore(pane.terminal)
+        hiddenOutputRestoreScheduled = false
       }
       clearHiddenOutputRestoreDeferredRetryTimer()
       hiddenOutputRestoreRetryDeferred = false
@@ -2469,7 +2536,7 @@ export function connectPanePty(
       const foreground = shouldWritePtyOutputForeground(deps.isVisibleRef.current)
       const restoreAppliesToCurrentPty =
         hiddenOutputRestorePtyId !== null && transport.getPtyId() === hiddenOutputRestorePtyId
-      if (shouldSkipHiddenRendererOutput(foreground)) {
+      if (shouldSkipHiddenRendererOutput(foreground, data)) {
         skipHiddenRendererOutput(data)
       } else if (
         (hiddenOutputRestoreNeeded || hiddenOutputRestoreInFlight) &&

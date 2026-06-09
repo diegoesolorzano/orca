@@ -84,6 +84,7 @@ const ptySizes = new Map<string, { cols: number; rows: number }>()
 // daemon shutdowns that do not flow through the local provider exit listener.
 const lastInputAtByPty = new Map<string, number>()
 const interactiveOutputCharsByPty = new Map<string, number>()
+const activeRendererPtys = new Set<string>()
 // Why: the agent-hooks server caches per-paneKey state (last prompt, last
 // tool) that otherwise grows unbounded as panes come and go. Track the
 // spawn-time paneKey so clearProviderPtyState can clear that cache on PTY
@@ -322,6 +323,44 @@ export type BuildPtyHostEnvOptions = {
 
 function readInheritedPath(baseEnv: Record<string, string>): string {
   return baseEnv.PATH ?? baseEnv.Path ?? process.env.PATH ?? process.env.Path ?? ''
+}
+
+function firstPathEntry(pathValue: string | undefined): string | null {
+  const first = pathValue?.split(delimiter).find((entry) => entry.trim().length > 0)
+  return first ?? null
+}
+
+function promoteAgentTeamsShimPath(
+  env: Record<string, string> | undefined,
+  requestedPath: string | undefined
+): void {
+  if (!env?.ORCA_AGENT_TEAMS_TEAM_ID) {
+    return
+  }
+  const shimPath = firstPathEntry(requestedPath)
+  if (!shimPath) {
+    return
+  }
+  const currentPathKey = env.PATH !== undefined || env.Path === undefined ? 'PATH' : 'Path'
+  const currentPath = env[currentPathKey] ?? ''
+  const remaining = currentPath
+    .split(delimiter)
+    .filter((entry) => entry.length > 0 && entry !== shimPath)
+  // Why: host env injection can prepend Orca's attribution/dev shims. Claude
+  // Agent Teams must still resolve our fake tmux before any real tmux.
+  env[currentPathKey] = [shimPath, ...remaining].join(delimiter)
+}
+
+function deleteRequestedEnvKeys(
+  env: Record<string, string> | undefined,
+  keys: string[] | undefined
+): void {
+  if (!env || !keys) {
+    return
+  }
+  for (const key of keys) {
+    delete env[key]
+  }
 }
 
 function isWslShellName(shellPath: string | undefined): boolean {
@@ -801,6 +840,7 @@ export function clearProviderPtyState(id: string): void {
   ptySizes.delete(id)
   lastInputAtByPty.delete(id)
   interactiveOutputCharsByPty.delete(id)
+  activeRendererPtys.delete(id)
   const paneKey = ptyPaneKey.get(id)
   const stillOwnsPaneKey = paneKey ? paneKeyPtyId.get(paneKey) === id : false
   // Why: drop the memory-collector registration so a dead PTY does not keep
@@ -891,6 +931,51 @@ export function rebindLocalProviderListeners(): void {
   rebindProviderListeners?.()
 }
 
+export type PtyRendererDeliveryDebugSnapshot = {
+  pendingPtyCount: number
+  pendingChars: number
+  maxPendingCharsByPty: number
+  rendererInFlightPtyCount: number
+  rendererInFlightChars: number
+  maxRendererInFlightCharsByPty: number
+  activeRendererPtyCount: number
+  flushScheduled: boolean
+  peakPendingChars: number
+  peakMaxPendingCharsByPty: number
+  peakRendererInFlightChars: number
+  peakMaxRendererInFlightCharsByPty: number
+  ackGatedFlushSkipCount: number
+}
+
+const EMPTY_PTY_RENDERER_DELIVERY_DEBUG_SNAPSHOT: PtyRendererDeliveryDebugSnapshot = {
+  pendingPtyCount: 0,
+  pendingChars: 0,
+  maxPendingCharsByPty: 0,
+  rendererInFlightPtyCount: 0,
+  rendererInFlightChars: 0,
+  maxRendererInFlightCharsByPty: 0,
+  activeRendererPtyCount: 0,
+  flushScheduled: false,
+  peakPendingChars: 0,
+  peakMaxPendingCharsByPty: 0,
+  peakRendererInFlightChars: 0,
+  peakMaxRendererInFlightCharsByPty: 0,
+  ackGatedFlushSkipCount: 0
+}
+
+let readPtyRendererDeliveryDebugSnapshot = (): PtyRendererDeliveryDebugSnapshot => ({
+  ...EMPTY_PTY_RENDERER_DELIVERY_DEBUG_SNAPSHOT
+})
+let resetPtyRendererDeliveryDebugSnapshot = (): void => {}
+
+export function getPtyRendererDeliveryDebugSnapshot(): PtyRendererDeliveryDebugSnapshot {
+  return readPtyRendererDeliveryDebugSnapshot()
+}
+
+export function resetPtyRendererDeliveryDebug(): void {
+  resetPtyRendererDeliveryDebugSnapshot()
+}
+
 function clearDidFinishLoadHandler(): void {
   if (didFinishLoadHandler && didFinishLoadWebContents) {
     didFinishLoadWebContents.removeListener('did-finish-load', didFinishLoadHandler)
@@ -919,8 +1004,21 @@ export function registerPtyHandlers(
   getSelectedCodexHomePath?: GetSelectedCodexHomePath,
   getSettings?: () => GlobalSettings,
   prepareClaudeAuth?: PrepareClaudeAuth,
-  store?: Store
+  store?: Store,
+  options?: {
+    awaitLocalPtyStartup?: () => Promise<void>
+  }
 ): void {
+  const getLocalPtyStartupPromise = (connectionId?: string | null): Promise<void> | undefined => {
+    if (connectionId) {
+      return undefined
+    }
+    // Why: during desktop cold start the daemon provider swap now overlaps
+    // first paint. Local spawns must wait before resolving getProvider(), while
+    // SSH/headless paths do not use the desktop daemon.
+    return options?.awaitLocalPtyStartup?.()
+  }
+
   // Remove any previously registered handlers so we can re-register them
   // (e.g. when macOS re-activates the app and creates a new window).
   ipcMain.removeHandler('pty:spawn')
@@ -933,6 +1031,8 @@ export function registerPtyHandlers(
   ipcMain.removeHandler('pty:settlePaneSerializer')
   ipcMain.removeHandler('pty:clearPendingPaneSerializer')
   ipcMain.removeHandler('pty:getMainBufferSnapshot')
+  ipcMain.removeHandler('pty:getRendererDeliveryDebugSnapshot')
+  ipcMain.removeHandler('pty:resetRendererDeliveryDebug')
   ipcMain.removeHandler('pty:writeAccepted')
   ipcMain.removeAllListeners('pty:write')
   ipcMain.removeAllListeners('pty:ackColdRestore')
@@ -1024,12 +1124,74 @@ export function registerPtyHandlers(
   const PTY_RENDERER_IN_FLIGHT_HIGH_WATER_CHARS = 512 * 1024
   const PTY_RENDERER_TOTAL_IN_FLIGHT_HIGH_WATER_CHARS = 8 * 1024 * 1024
   const PTY_RENDERER_INTERACTIVE_RESERVE_CHARS = 256 * 1024
+  // Why: active panes need a bounded lane through old hidden bulk output so a
+  // keystroke redraw can reach the renderer before every background ACK lands.
+  const PTY_RENDERER_ACTIVE_PTY_IN_FLIGHT_RESERVE_CHARS = 512 * 1024
   // Why: keep the immediate path bounded to keystroke-sized TUI redraws;
   // large output and non-interactive output must still use the batcher.
   const INTERACTIVE_OUTPUT_WINDOW_MS = 100
   const INTERACTIVE_OUTPUT_MAX_CHARS = 1024
   const INTERACTIVE_REDRAW_MAX_CHARS = PTY_BATCH_FLUSH_CHUNK_CHARS
   const INTERACTIVE_OUTPUT_BUDGET_CHARS = 32 * 1024
+  let peakPendingChars = 0
+  let peakMaxPendingCharsByPty = 0
+  let peakRendererInFlightChars = 0
+  let peakMaxRendererInFlightCharsByPty = 0
+  let ackGatedFlushSkipCount = 0
+
+  function getMaxMapValue(values: Iterable<number>): number {
+    let max = 0
+    for (const value of values) {
+      max = Math.max(max, value)
+    }
+    return max
+  }
+
+  function readCurrentPtyRendererDeliveryDebugSnapshot(): PtyRendererDeliveryDebugSnapshot {
+    let pendingChars = 0
+    let maxPendingCharsByPty = 0
+    for (const pending of pendingData.values()) {
+      const chars = pending.data.length
+      pendingChars += chars
+      maxPendingCharsByPty = Math.max(maxPendingCharsByPty, chars)
+    }
+    return {
+      pendingPtyCount: pendingData.size,
+      pendingChars,
+      maxPendingCharsByPty,
+      rendererInFlightPtyCount: rendererInFlightCharsByPty.size,
+      rendererInFlightChars: rendererInFlightTotalChars,
+      maxRendererInFlightCharsByPty: getMaxMapValue(rendererInFlightCharsByPty.values()),
+      activeRendererPtyCount: activeRendererPtys.size,
+      flushScheduled: flushTimer !== null,
+      peakPendingChars,
+      peakMaxPendingCharsByPty,
+      peakRendererInFlightChars,
+      peakMaxRendererInFlightCharsByPty,
+      ackGatedFlushSkipCount
+    }
+  }
+
+  function recordPtyRendererDeliveryPressure(): void {
+    const current = readCurrentPtyRendererDeliveryDebugSnapshot()
+    peakPendingChars = Math.max(peakPendingChars, current.pendingChars)
+    peakMaxPendingCharsByPty = Math.max(peakMaxPendingCharsByPty, current.maxPendingCharsByPty)
+    peakRendererInFlightChars = Math.max(peakRendererInFlightChars, current.rendererInFlightChars)
+    peakMaxRendererInFlightCharsByPty = Math.max(
+      peakMaxRendererInFlightCharsByPty,
+      current.maxRendererInFlightCharsByPty
+    )
+  }
+
+  readPtyRendererDeliveryDebugSnapshot = readCurrentPtyRendererDeliveryDebugSnapshot
+  resetPtyRendererDeliveryDebugSnapshot = () => {
+    peakPendingChars = 0
+    peakMaxPendingCharsByPty = 0
+    peakRendererInFlightChars = 0
+    peakMaxRendererInFlightCharsByPty = 0
+    ackGatedFlushSkipCount = 0
+    recordPtyRendererDeliveryPressure()
+  }
 
   function isLikelyInteractiveRedraw(data: string): boolean {
     if (data.length <= INTERACTIVE_OUTPUT_MAX_CHARS) {
@@ -1085,8 +1247,13 @@ export function registerPtyHandlers(
     const totalLimit =
       PTY_RENDERER_TOTAL_IN_FLIGHT_HIGH_WATER_CHARS +
       (options.interactive === true ? PTY_RENDERER_INTERACTIVE_RESERVE_CHARS : 0)
+    // Why: the reserve is per active PTY, not global; one active pane should
+    // stay responsive without letting every background pane burst past the cap.
+    const ptyLimit =
+      PTY_RENDERER_IN_FLIGHT_HIGH_WATER_CHARS +
+      (options.interactive === true ? PTY_RENDERER_ACTIVE_PTY_IN_FLIGHT_RESERVE_CHARS : 0)
     return (
-      (rendererInFlightCharsByPty.get(id) ?? 0) < PTY_RENDERER_IN_FLIGHT_HIGH_WATER_CHARS &&
+      (rendererInFlightCharsByPty.get(id) ?? 0) < ptyLimit &&
       rendererInFlightTotalChars < totalLimit
     )
   }
@@ -1098,7 +1265,22 @@ export function registerPtyHandlers(
     const charCount = getPtyPayloadCharCount(payload)
     rendererInFlightCharsByPty.set(id, (rendererInFlightCharsByPty.get(id) ?? 0) + charCount)
     rendererInFlightTotalChars += charCount
+    recordPtyRendererDeliveryPressure()
     mainWindow.webContents.send('pty:data', payload)
+  }
+
+  function getPendingPtyFlushEntries(): [string, PendingPtyData][] {
+    const entries = Array.from(pendingData.entries())
+    const active: [string, PendingPtyData][] = []
+    const background: [string, PendingPtyData][] = []
+    for (const entry of entries) {
+      if (activeRendererPtys.has(entry[0])) {
+        active.push(entry)
+      } else {
+        background.push(entry)
+      }
+    }
+    return [...active, ...background]
   }
 
   function appendPendingPtyData(
@@ -1131,14 +1313,15 @@ export function registerPtyHandlers(
       pendingData.clear()
       rendererInFlightCharsByPty.clear()
       rendererInFlightTotalChars = 0
+      recordPtyRendererDeliveryPressure()
       return
     }
     let writes = 0
-    for (const [id, pending] of Array.from(pendingData.entries())) {
+    for (const [id, pending] of getPendingPtyFlushEntries()) {
       if (writes >= PTY_BATCH_FLUSH_MAX_WRITES) {
         break
       }
-      if (!canSendPtyDataToRenderer(id)) {
+      if (!canSendPtyDataToRenderer(id, { interactive: activeRendererPtys.has(id) })) {
         continue
       }
       pendingData.delete(id)
@@ -1155,6 +1338,10 @@ export function registerPtyHandlers(
       sendPtyDataToRenderer(id, makePtyDataPayload(id, chunk, pending.startSeq))
       writes++
     }
+    if (pendingData.size > 0 && writes === 0) {
+      ackGatedFlushSkipCount++
+    }
+    recordPtyRendererDeliveryPressure()
     if (pendingData.size > 0 && writes > 0) {
       // Why: a background terminal can dump megabytes at once. Yield between
       // small IPC slices so keystroke writes are not stuck behind one flush.
@@ -1202,6 +1389,7 @@ export function registerPtyHandlers(
         pendingData.clear()
         rendererInFlightCharsByPty.clear()
         rendererInFlightTotalChars = 0
+        recordPtyRendererDeliveryPressure()
         return
       }
       const existing = pendingData.get(payload.id)
@@ -1218,6 +1406,7 @@ export function registerPtyHandlers(
         // bounded, and the per-PTY cap still prevents an active TUI runaway.
         if (!canSendPtyDataToRenderer(payload.id, { interactive: true })) {
           pendingData.set(payload.id, pending)
+          recordPtyRendererDeliveryPressure()
           return
         }
         pendingData.delete(payload.id)
@@ -1234,6 +1423,7 @@ export function registerPtyHandlers(
         return
       }
       pendingData.set(payload.id, pending)
+      recordPtyRendererDeliveryPressure()
       if (!flushTimer) {
         schedulePendingDataFlush(PTY_BATCH_INTERVAL_MS)
       }
@@ -1264,6 +1454,7 @@ export function registerPtyHandlers(
           rendererInFlightTotalChars - (rendererInFlightCharsByPty.get(payload.id) ?? 0)
         )
         rendererInFlightCharsByPty.delete(payload.id)
+        recordPtyRendererDeliveryPressure()
         mainWindow.webContents.send('pty:exit', payload)
       }
     })
@@ -1383,6 +1574,10 @@ export function registerPtyHandlers(
   // Hardcoding localProvider.getPtyProcess() would silently fail for remote PTYs.
   runtime?.setPtyController({
     spawn: async (args) => {
+      const startupPromise = getLocalPtyStartupPromise(args.connectionId)
+      if (startupPromise) {
+        await startupPromise
+      }
       const provider = getProvider(args.connectionId)
       const isClaudeLaunch = !args.connectionId && isClaudeLaunchCommand(args.command)
       if (isClaudeLaunch && isClaudeAuthSwitchInProgress()) {
@@ -1447,6 +1642,7 @@ export function registerPtyHandlers(
       let env: Record<string, string> | undefined = claudeAuth
         ? { ...sshScopedEnv, ...claudeAuth.envPatch }
         : sshScopedEnv
+      const requestedAgentTeamsPath = env?.ORCA_AGENT_TEAMS_TEAM_ID ? env.PATH : undefined
       if (args.preAllocatedHandle) {
         env = { ...env, ORCA_TERMINAL_HANDLE: args.preAllocatedHandle }
       }
@@ -1476,8 +1672,12 @@ export function registerPtyHandlers(
           agentStatusHooksEnabled: isAgentStatusHooksEnabled(getSettings?.()),
           networkProxySettings: getSettings?.()
         })
+        promoteAgentTeamsShimPath(env, requestedAgentTeamsPath)
       }
 
+      const authEnvToDelete = claudeAuth?.stripAuthEnv
+        ? [...CLAUDE_AUTH_ENV_VARS, 'ANTHROPIC_CUSTOM_HEADERS']
+        : undefined
       const spawnOptions: PtySpawnOptions = {
         cols: args.cols,
         rows: args.rows,
@@ -1486,10 +1686,8 @@ export function registerPtyHandlers(
         ...(isMintedSessionId ? { isNewSession: true } : {})
       }
       spawnOptions.envToDelete = mergePtyEnvDeletions(
-        claudeAuth?.stripAuthEnv
-          ? [...CLAUDE_AUTH_ENV_VARS, 'ANTHROPIC_CUSTOM_HEADERS']
-          : undefined,
-        args.connectionId ? [] : getInheritedAgentHookEnvKeysToDelete(env)
+        mergePtyEnvDeletions(authEnvToDelete, args.envToDelete ?? []),
+        isDaemonHostSpawn ? getInheritedAgentHookEnvKeysToDelete(env) : []
       )
       if (skipCodexHomeEnv) {
         spawnOptions.envToDelete = mergePtyEnvDeletions(
@@ -1497,6 +1695,8 @@ export function registerPtyHandlers(
           CODEX_HOME_ENV_KEYS
         )
       }
+      deleteRequestedEnvKeys(env, spawnOptions.envToDelete)
+      promoteAgentTeamsShimPath(env, requestedAgentTeamsPath)
       if (args.command !== undefined) {
         spawnOptions.command = args.command
       }
@@ -1739,8 +1939,8 @@ export function registerPtyHandlers(
     getSize: (ptyId) => ptySizes.get(ptyId) ?? null,
     resize: (ptyId, cols, rows) => {
       try {
-        ptySizes.set(ptyId, { cols, rows })
         getProviderForPty(ptyId).resize(ptyId, cols, rows)
+        ptySizes.set(ptyId, { cols, rows })
         return true
       } catch {
         return false
@@ -1783,6 +1983,13 @@ export function registerPtyHandlers(
     }
   )
 
+  ipcMain.handle('pty:getRendererDeliveryDebugSnapshot', (): PtyRendererDeliveryDebugSnapshot => {
+    return getPtyRendererDeliveryDebugSnapshot()
+  })
+  ipcMain.handle('pty:resetRendererDeliveryDebug', (): void => {
+    resetPtyRendererDeliveryDebug()
+  })
+
   ipcMain.handle(
     'pty:spawn',
     async (
@@ -1792,6 +1999,7 @@ export function registerPtyHandlers(
         rows: number
         cwd?: string
         env?: Record<string, string>
+        envToDelete?: string[]
         command?: string
         connectionId?: string | null
         worktreeId?: string
@@ -1818,6 +2026,10 @@ export function registerPtyHandlers(
         }
       }
     ) => {
+      const startupPromise = getLocalPtyStartupPromise(args.connectionId)
+      if (startupPromise) {
+        await startupPromise
+      }
       const provider = getProvider(args.connectionId)
       const isClaudeLaunch = !args.connectionId && isClaudeLaunchCommand(args.command)
       if (isClaudeLaunch && isClaudeAuthSwitchInProgress()) {
@@ -1917,6 +2129,7 @@ export function registerPtyHandlers(
           : null
       const stablePaneKey = verifiedPaneKey ?? migrationUnsupportedPaneKey
       const baseEnv = baseEnvWithAuth ? { ...baseEnvWithAuth } : undefined
+      const requestedAgentTeamsPath = baseEnv?.ORCA_AGENT_TEAMS_TEAM_ID ? baseEnv.PATH : undefined
       if (baseEnv && stablePaneKey) {
         baseEnv.ORCA_PANE_KEY = stablePaneKey
         if (typeof args.tabId === 'string') {
@@ -1995,6 +2208,7 @@ export function registerPtyHandlers(
             agentStatusHooksEnabled: isAgentStatusHooksEnabled(getSettings?.()),
             networkProxySettings: getSettings?.()
           })
+          promoteAgentTeamsShimPath(env, requestedAgentTeamsPath)
         } catch (err) {
           // Why: buildPtyHostEnv has filesystem side-effects (Pi overlay
           // materialization). If it throws before we reach provider.spawn,
@@ -2018,11 +2232,13 @@ export function registerPtyHandlers(
         : undefined
       const combinedEnvToDelete = mergePtyEnvDeletions(
         mergePtyEnvDeletions(
-          envToDelete,
-          args.connectionId ? [] : getInheritedAgentHookEnvKeysToDelete(spawnEnv)
+          mergePtyEnvDeletions(envToDelete, args.envToDelete ?? []),
+          isDaemonHostSpawn ? getInheritedAgentHookEnvKeysToDelete(spawnEnv) : []
         ),
         skipCodexHomeEnv ? CODEX_HOME_ENV_KEYS : []
       )
+      deleteRequestedEnvKeys(spawnEnv, combinedEnvToDelete)
+      promoteAgentTeamsShimPath(spawnEnv, requestedAgentTeamsPath)
       const spawnOptions: PtySpawnOptions = {
         cols: args.cols,
         rows: args.rows,
@@ -2415,8 +2631,16 @@ export function registerPtyHandlers(
     if (runtime?.getDriver(args.id).kind === 'mobile') {
       return
     }
+    const provider = tryGetProviderForPty(args.id)
+    if (!provider) {
+      return
+    }
+    try {
+      provider.resize(args.id, args.cols, args.rows)
+    } catch {
+      return
+    }
     ptySizes.set(args.id, { cols: args.cols, rows: args.rows })
-    tryGetProviderForPty(args.id)?.resize(args.id, args.cols, args.rows)
     runtime?.onExternalPtyResize(args.id, args.cols, args.rows)
   })
 
@@ -2460,7 +2684,26 @@ export function registerPtyHandlers(
     } else {
       rendererInFlightCharsByPty.set(args.id, next)
     }
-    tryGetProviderForPty(args.id)?.acknowledgeDataEvent(args.id, charCount)
+    tryGetProviderForPty(args.id)?.acknowledgeDataEvent(args.id, acknowledged)
+    recordPtyRendererDeliveryPressure()
+    if (pendingData.size > 0 && !flushTimer) {
+      schedulePendingDataFlush(0)
+    }
+  })
+
+  ipcMain.removeAllListeners('pty:setActiveRendererPty')
+  ipcMain.on('pty:setActiveRendererPty', (_event, args: { id: string; active: boolean }) => {
+    if (typeof args.id !== 'string' || !args.id) {
+      return
+    }
+    // Why: this is a renderer scheduling hint only. PTY reads, runtime state,
+    // and notifications continue for inactive terminals; active panes merely
+    // get first chance at the bounded renderer output reserve.
+    if (args.active) {
+      activeRendererPtys.add(args.id)
+    } else {
+      activeRendererPtys.delete(args.id)
+    }
     if (pendingData.size > 0 && !flushTimer) {
       schedulePendingDataFlush(0)
     }

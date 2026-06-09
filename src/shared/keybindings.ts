@@ -51,6 +51,7 @@ export type KeybindingActionId =
   | 'worktree.history.forward'
   | 'tab.newTerminal'
   | 'tab.newBrowser'
+  | 'tab.newSimulator'
   | 'tab.newMarkdown'
   | 'tab.openMarkdown'
   | 'tab.close'
@@ -82,6 +83,7 @@ export type KeybindingActionId =
   | 'terminal.paste'
   | 'terminal.search'
   | 'terminal.clear'
+  | 'terminal.redraw'
   | 'terminal.focusNextPane'
   | 'terminal.focusPreviousPane'
   | 'terminal.equalizePaneSizes'
@@ -420,6 +422,18 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
     defaultBindings: platformBindings(['Mod+Shift+B'])
   },
   {
+    id: 'tab.newSimulator',
+    title: 'New mobile emulator tab',
+    group: 'Tabs',
+    scope: 'tabs',
+    searchKeywords: ['shortcut', 'tab', 'simulator', 'emulator', 'mobile', 'ios', 'new'],
+    defaultBindings: {
+      darwin: ['Mod+Shift+E'],
+      linux: [],
+      win32: []
+    }
+  },
+  {
     id: 'tab.newMarkdown',
     title: 'New markdown tab',
     group: 'Tabs',
@@ -694,6 +708,14 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
     scope: 'terminal',
     searchKeywords: ['shortcut', 'pane', 'clear'],
     defaultBindings: platformBindings(['Mod+K'])
+  },
+  {
+    id: 'terminal.redraw',
+    title: 'Redraw terminal',
+    group: 'Terminal Panes',
+    scope: 'terminal',
+    searchKeywords: ['shortcut', 'redraw', 'repaint', 'glyph', 'atlas', 'corrupt', 'webgl'],
+    defaultBindings: platformBindings(['Mod+Alt+L'])
   },
   {
     id: 'terminal.focusNextPane',

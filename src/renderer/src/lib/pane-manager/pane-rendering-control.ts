@@ -1,6 +1,11 @@
 import type { ManagedPaneInternal } from './pane-manager-types'
 import { safeFit } from './pane-tree-ops'
-import { attachWebgl, disposeWebgl, markComplexScriptOutput } from './pane-webgl-renderer'
+import {
+  attachWebgl,
+  disposeWebgl,
+  markComplexScriptOutput,
+  redrawPane
+} from './pane-webgl-renderer'
 import { reattachWebglIfNeeded } from './pane-webgl-reattach'
 
 export function setPaneGpuRenderingState(
@@ -33,6 +38,13 @@ export function markPaneComplexScriptOutput(
   const pane = panes.get(paneId)
   if (pane) {
     markComplexScriptOutput(pane)
+  }
+}
+
+export function redrawPaneById(panes: Map<number, ManagedPaneInternal>, paneId: number): void {
+  const pane = panes.get(paneId)
+  if (pane) {
+    redrawPane(pane)
   }
 }
 

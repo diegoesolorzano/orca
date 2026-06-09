@@ -26,6 +26,9 @@ import { AgentStep } from '../onboarding/AgentStep'
 import { NotificationStep } from '../onboarding/NotificationStep'
 import { useAppStore } from '@/store'
 import type { TuiAgent } from '../../../../shared/types'
+import { translate } from '@/i18n/i18n'
+
+type FeatureWallSetupChecklistLayout = 'modal' | 'embedded'
 
 type FeatureWallSetupChecklistProps = {
   activeStep: FeatureWallSetupStep | null
@@ -33,6 +36,8 @@ type FeatureWallSetupChecklistProps = {
   onSelectStep: (id: FeatureWallSetupStepId) => void
   onOrchestrationSkillInstalledChange: (installed: boolean) => void
   onBrowserUseSkillInstalledChange: (installed: boolean) => void
+  /** Modal keeps a compact rail; embedded (settings pane) gets more column breathing room. */
+  layout?: FeatureWallSetupChecklistLayout
 }
 
 function SetupStepRow(props: {
@@ -41,19 +46,29 @@ function SetupStepRow(props: {
   active: boolean
   ordinal: number
   onSelect: () => void
+  layout: FeatureWallSetupChecklistLayout
 }): React.JSX.Element {
-  const { step, done, active, ordinal, onSelect } = props
+  const { step, done, active, ordinal, onSelect, layout } = props
+  const isEmbedded = layout === 'embedded'
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-current={active ? 'step' : undefined}
       className={cn(
-        'relative flex w-full items-center gap-3 rounded-md border px-3 py-2.5 text-left transition-colors',
+        'relative flex w-full items-center gap-3 text-left transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-        active
-          ? 'border-border bg-accent text-accent-foreground'
-          : 'border-border bg-background hover:bg-accent'
+        isEmbedded
+          ? cn(
+              'rounded-lg px-3 py-2',
+              active ? 'bg-accent text-accent-foreground' : 'hover:bg-accent'
+            )
+          : cn(
+              'rounded-md border px-3 py-2.5',
+              active
+                ? 'border-border bg-accent text-accent-foreground'
+                : 'border-border bg-background hover:bg-accent'
+            )
       )}
     >
       {active ? (
@@ -69,8 +84,8 @@ function SetupStepRow(props: {
       >
         {done ? <Check className="size-3" /> : <span className="text-xs">{ordinal}</span>}
       </span>
-      <span className="min-w-0">
-        <span className="block text-[15px] font-medium leading-tight text-foreground">
+      <span className="min-w-0 flex-1">
+        <span className="block text-[15px] font-medium leading-snug text-foreground">
           {step.name}
         </span>
       </span>
@@ -85,6 +100,7 @@ function SetupSection(props: {
   activeStepId: FeatureWallSetupStepId | null
   progress: FeatureWallSetupProgress
   onSelectStep: (id: FeatureWallSetupStepId) => void
+  layout: FeatureWallSetupChecklistLayout
 }): React.JSX.Element {
   const doneCount = props.steps.filter((step) => props.progress.stepDone[step.id]).length
   return (
@@ -105,6 +121,7 @@ function SetupSection(props: {
             done={props.progress.stepDone[step.id]}
             active={props.activeStepId === step.id}
             ordinal={props.startOrdinal + index}
+            layout={props.layout}
             onSelect={() => props.onSelectStep(step.id)}
           />
         ))}
@@ -228,7 +245,10 @@ function TaskSourcesAction(): React.JSX.Element {
           }}
         >
           <ArrowUpRight className="size-3.5" />
-          See tasks
+          {translate(
+            'auto.components.feature.wall.FeatureWallSetupChecklist.b1f1981c5e',
+            'See tasks'
+          )}
         </Button>
       </div>
     </div>
@@ -238,7 +258,8 @@ function TaskSourcesAction(): React.JSX.Element {
 export function FeatureWallSetupChecklist(
   props: FeatureWallSetupChecklistProps
 ): React.JSX.Element {
-  const { activeStep, progress, onSelectStep } = props
+  const { activeStep, progress, onSelectStep, layout = 'modal' } = props
+  const isEmbedded = layout === 'embedded'
   const activeDone = activeStep ? progress.stepDone[activeStep.id] : false
   // Only steps with a visual constrain the caption to a narrow column so the
   // illustration can sit beside it; captionless steps let the copy run full width.
@@ -248,31 +269,63 @@ export function FeatureWallSetupChecklist(
     activeStep?.id === 'add-two-repos'
   const parallelWorkSteps = getFeatureWallSetupStepsForSection('parallel-work')
   const setupSteps = getFeatureWallSetupStepsForSection('setup')
+  const visualBreakpoint = isEmbedded ? 'xl' : 'sm'
+  const visualGridClass =
+    visualBreakpoint === 'xl'
+      ? 'gap-8 xl:grid-cols-[minmax(0,1fr)_auto] xl:gap-12'
+      : 'gap-8 sm:grid-cols-[minmax(0,48ch)_auto] sm:gap-10'
 
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(200px,300px)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)]">
-      <div className="scrollbar-sleek min-h-0 space-y-5 overflow-y-auto pr-1">
+    <div
+      className={cn(
+        'grid h-full min-h-0',
+        isEmbedded
+          ? 'grid-rows-[auto_minmax(0,1fr)] gap-10 lg:grid-cols-[minmax(15rem,17rem)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)] lg:gap-16'
+          : 'grid-rows-[auto_minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(200px,300px)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)]'
+      )}
+    >
+      <div
+        className={cn(
+          'scrollbar-sleek min-h-0 space-y-5 overflow-y-auto',
+          isEmbedded ? 'pr-4' : 'pr-1'
+        )}
+      >
         <SetupSection
-          title="Milestones"
+          title={translate(
+            'auto.components.feature.wall.FeatureWallSetupChecklist.713cc529a5',
+            'Milestones'
+          )}
           steps={parallelWorkSteps}
           startOrdinal={1}
           activeStepId={activeStep?.id ?? null}
           progress={progress}
           onSelectStep={onSelectStep}
+          layout={layout}
         />
         <SetupSection
-          title="Setup"
+          title={translate(
+            'auto.components.feature.wall.FeatureWallSetupChecklist.1a6a7d6c80',
+            'Setup'
+          )}
           steps={setupSteps}
           startOrdinal={parallelWorkSteps.length + 1}
           activeStepId={activeStep?.id ?? null}
           progress={progress}
           onSelectStep={onSelectStep}
+          layout={layout}
         />
       </div>
 
-      <section className="scrollbar-sleek min-h-0 overflow-y-auto border-t border-border pt-5 lg:border-l lg:border-t-0 lg:pl-7 lg:pt-0">
+      <section
+        className={cn(
+          'scrollbar-sleek min-h-0 overflow-y-auto',
+          isEmbedded
+            ? 'pt-10 lg:border-l lg:border-border/50 lg:pl-14 lg:pt-0'
+            : 'border-t border-border pt-5 lg:border-l lg:border-t-0 lg:pl-7 lg:pt-0'
+        )}
+      >
         {activeStep ? (
-          <div className="flex h-full flex-col gap-5">
+          <div className={cn('flex h-full flex-col', isEmbedded ? 'gap-7' : 'gap-5')}>
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <div className="text-2xl font-semibold leading-tight text-foreground">
@@ -287,20 +340,29 @@ export function FeatureWallSetupChecklist(
                     : 'border-border bg-muted/30 text-muted-foreground'
                 )}
               >
-                {activeDone ? 'Done' : 'Not done yet'}
+                {activeDone
+                  ? translate(
+                      'auto.components.feature.wall.FeatureWallSetupChecklist.13294d3405',
+                      'Done'
+                    )
+                  : translate(
+                      'auto.components.feature.wall.FeatureWallSetupChecklist.0235b268b2',
+                      'Not done yet'
+                    )}
               </span>
             </div>
             <div
               className={cn(
-                'grid max-w-3xl items-start',
-                hasStepVisual ? 'gap-8 sm:grid-cols-[minmax(0,48ch)_auto] sm:gap-10' : 'gap-5'
+                'grid items-start',
+                hasStepVisual ? visualGridClass : 'max-w-3xl gap-5',
+                !hasStepVisual && isEmbedded ? 'max-w-none' : null
               )}
             >
               <div className="min-w-0">
                 <p
                   className={cn(
-                    'text-base leading-normal text-muted-foreground',
-                    hasStepVisual ? 'pr-4 sm:pr-6' : null
+                    'text-base leading-relaxed text-muted-foreground',
+                    hasStepVisual && !isEmbedded ? 'pr-4 sm:pr-6' : null
                   )}
                 >
                   {activeStep.description}
@@ -312,7 +374,7 @@ export function FeatureWallSetupChecklist(
                 ) : null}
                 {/* Action lives under the caption, not after the grid, so it sits just
                     below the copy instead of being pushed down by the taller visual. */}
-                <div className="mt-7 min-w-0">
+                <div className={cn('min-w-0', isEmbedded ? 'mt-8' : 'mt-7')}>
                   <SelectedStepAction {...props} />
                 </div>
               </div>
