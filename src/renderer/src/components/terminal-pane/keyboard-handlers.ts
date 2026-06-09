@@ -296,6 +296,15 @@ export function useTerminalKeyboardShortcuts({
         return
       }
 
+      // Mod+Alt+L recovers a WebGL pane with a corrupt glyph atlas (issue #5031)
+      // by clearing the atlas + repainting, without switching tabs.
+      if (action.type === 'redrawActivePane') {
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        manager.redrawActivePane()
+        return
+      }
+
       // Cmd+[ / Cmd+] cycles active split pane focus.
       if (action.type === 'focusPane') {
         const panes = manager.getPanes()

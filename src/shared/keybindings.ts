@@ -83,6 +83,7 @@ export type KeybindingActionId =
   | 'terminal.paste'
   | 'terminal.search'
   | 'terminal.clear'
+  | 'terminal.redraw'
   | 'terminal.focusNextPane'
   | 'terminal.focusPreviousPane'
   | 'terminal.equalizePaneSizes'
@@ -707,6 +708,14 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
     scope: 'terminal',
     searchKeywords: ['shortcut', 'pane', 'clear'],
     defaultBindings: platformBindings(['Mod+K'])
+  },
+  {
+    id: 'terminal.redraw',
+    title: 'Redraw terminal',
+    group: 'Terminal Panes',
+    scope: 'terminal',
+    searchKeywords: ['shortcut', 'redraw', 'repaint', 'glyph', 'atlas', 'corrupt', 'webgl'],
+    defaultBindings: platformBindings(['Mod+Alt+L'])
   },
   {
     id: 'terminal.focusNextPane',

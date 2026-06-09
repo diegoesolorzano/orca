@@ -36,6 +36,24 @@ describe('resolveTerminalShortcutAction', () => {
     }
   })
 
+  it('resolves the redraw terminal shortcut on both platforms', () => {
+    expect(
+      resolveTerminalShortcutAction(
+        event({ key: 'l', code: 'KeyL', metaKey: true, altKey: true }),
+        true
+      )
+    ).toEqual({ type: 'redrawActivePane' })
+    expect(
+      resolveTerminalShortcutAction(
+        event({ key: 'l', code: 'KeyL', ctrlKey: true, altKey: true }),
+        false,
+        'false',
+        0,
+        true
+      )
+    ).toEqual({ type: 'redrawActivePane' })
+  })
+
   it('resolves the explicit macOS terminal shortcut allowlist', () => {
     expect(
       resolveTerminalShortcutAction(event({ key: 'f', code: 'KeyF', metaKey: true }), true)
