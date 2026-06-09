@@ -296,8 +296,8 @@ export function useTerminalKeyboardShortcuts({
         return
       }
 
-      // Mod+Alt+L recovers a WebGL pane with a corrupt glyph atlas (issue #5031)
-      // by clearing the atlas + repainting, without switching tabs.
+      // terminal.redraw recovers a WebGL pane with a corrupt glyph atlas (issue
+      // #5031) by clearing the atlas + repainting, without switching tabs.
       if (action.type === 'redrawActivePane') {
         e.preventDefault()
         e.stopImmediatePropagation()

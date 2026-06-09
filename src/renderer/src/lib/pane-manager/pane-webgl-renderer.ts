@@ -47,8 +47,13 @@ export function redrawPane(pane: ManagedPaneInternal): void {
       /* ignore — clearTextureAtlas can be a no-op or unavailable on some GPUs */
     }
   }
+  const lastRow = pane.terminal.rows - 1
+  if (lastRow < 0) {
+    // Why: a disposed/unsized terminal can report rows=0; skip the invalid range.
+    return
+  }
   try {
-    pane.terminal.refresh(0, pane.terminal.rows - 1)
+    pane.terminal.refresh(0, lastRow)
   } catch {
     /* ignore — pane may have been disposed in the meantime */
   }
