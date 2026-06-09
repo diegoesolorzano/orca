@@ -90,3 +90,21 @@ del fork.
 **Anclas en el codigo:** `src/main/git/worktree.ts` (`addWorktree`/`removeWorktree`),
 deteccion de setup command, `WorktreeVisibilityDialog.tsx` como referencia de dialogos
 de decision en la creacion.
+
+## 004 — Recuperacion del atlas WebGL del terminal (glifos corruptos)
+
+**Fecha:** 2026-06-09 · **Estado:** IMPLEMENTADA en el fork (rama
+`feat/webgl-atlas-recovery`, mergeada a `personal/build`). PR upstream EN PAUSA
+(esperando que baje la churn del workstream `term-speed-2`). Issue: stablyai/orca#5031.
+
+Los TUIs de agente (spinner braille U+2800-28FF, box-drawing U+2500-257F, blocks
+U+2588) no estan en los rangos de fallback a DOM, asi que el pane se queda en WebGL;
+el redibujado rapido corrompe el atlas de glifos sin evento de context-loss y nada lo
+recupera salvo ocultar+mostrar el tab. Solucion: comando **"Redraw terminal"**
+(`terminal.redraw`, default `Mod+Alt+L`, reasignable) que llama `clearTextureAtlas()`
++ `refresh()` sobre el pane activo — recupera en sitio sin cambiar de tab. NO se
+ampliaron los rangos complex-script (empujaria los TUIs de agente al DOM lento).
+FR-4 (auto-limpiar al foco) DESCARTADO: la transicion a foreground ya recrea WebGL.
+
+Artefactos: `docs-fork/specs/orca-5031-webgl-atlas-recovery.md`, `.claude/plans/
+orca-5031-webgl-atlas-recovery-plan.md`, reviews en `.claude/reviews/`.
