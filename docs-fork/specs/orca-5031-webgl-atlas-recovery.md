@@ -58,11 +58,15 @@ equivalente.
 - [ ] FR-3: Atajo de teclado configurable — accion nueva `terminal.redraw` en el
   registro de keybindings con default `Mod+Alt+L` (libre en las 3 plataformas),
   `allowInTerminal: true`, descubrible/reasignable en Settings → Shortcuts.
-- [ ] FR-4: Auto-limpieza del atlas al recuperar foreground un pane WebGL (incondicional
-  en v1). Disparo PRECISO: solo en la transicion a foreground de tab/pane — el mismo
-  punto que ya re-adjunta WebGL al volver a primer plano (`reattachWebglIfNeeded`/
-  resume), NO en cada evento `focus`/`focusin` del DOM. Idempotente: un flag por pane
-  evita repetir si no hubo transicion real.
+- [ ] ~~FR-4: Auto-limpieza del atlas al recuperar foreground~~ **DESCARTADO en
+  implementacion (2026-06-09)**: la transicion a foreground YA destruye y recrea WebGL
+  (`use-terminal-pane-global-effects.ts`: `isVisible` → `suspendRendering()` al ocultar
+  / `resumeRendering()` al mostrar), reconstruyendo el atlas desde cero. Por eso el
+  workaround de "cambiar de tab" funciona hoy. Limpiar el atlas en esa transicion seria
+  redundante. La falla real persiste SOLO mientras el pane se queda en primer plano
+  redibujando — caso que cubre el comando manual (FR-1/2/3). Auto-recuperacion en
+  primer plano sostenido requeriria una heuristica sin señal fiable (no hay evento de
+  corrupcion) → fuera de alcance.
 - [ ] FR-5: Routing del comando definido: solo actua si el tab activo es de terminal
   (`activeTabType === 'terminal'`) con un `PaneManager` montado y un pane activo
   (`getActivePane()`); en cualquier otro caso (editor/browser/sin pane) es no-op
@@ -85,15 +89,14 @@ se valida que se invocan las primitivas correctas + protocolo manual abajo):
   no-op silencioso.
 - **Given** el atajo `Mod+Alt+L`, **When** el usuario lo busca en Settings → Shortcuts,
   **Then** aparece con titulo "Redraw terminal" y grupo, y es re-asignable.
-- **(FR-4)** **Given** un pane WebGL que transiciona a foreground, **When** vuelve a
-  primer plano, **Then** se llama `clearTextureAtlas` exactamente una vez por
-  transicion (un segundo foreground sin transicion intermedia NO repite).
+- **(FR-5 routing)** **Given** un tab que NO es de terminal, **When** se intenta el
+  atajo, **Then** no actua — implicito: el keydown handler de terminal solo corre en un
+  tab de terminal (no requiere guard explicito).
 
 ### Protocolo de reproduccion manual (obligatorio antes de cerrar)
 
 1. Correr un agente con spinner (Claude Code) en un pane hasta ver glifos corruptos.
-2. Invocar el atajo → el pane se repinta correcto sin cambiar de tab.
-3. Repetir corrupción y cambiar a otro tab y volver → FR-4 lo repinta solo.
+2. Invocar el atajo `Mod+Alt+L` → el pane se repinta correcto sin cambiar de tab.
 
 ## Scope
 
@@ -118,23 +121,20 @@ se valida que se invocan las primitivas correctas + protocolo manual abajo):
 - [ ] Paleta de comandos: **fuera de v1** (la Cmd+J es de acciones de workspace; mal
   fit para un redraw de pane). Descubribilidad por Settings → Shortcuts.
 
-### Renderer — auto-recuperacion (FR-4, en v1)
-- [ ] Gancho en la transicion a foreground del pane — reuso del punto que ya llama
-  `reattachWebglIfNeeded`/`refresh` al volver a primer plano (`pane-rendering-control.ts`
-  `resumePaneRendering`/ruta equivalente). Limpiar el atlas (`clearTextureAtlas`) una
-  sola vez por transicion, gated por un flag por pane; NO enganchar a eventos `focus`
-  del DOM.
+### Renderer — auto-recuperacion (FR-4): DESCARTADA
+- ~~Gancho de foreground~~ — redundante: la transicion a foreground ya destruye/recrea
+  WebGL (suspend/resume por visibilidad). Ver FR-4 arriba.
 
 ### Testing
 - [ ] Unit: `redrawPane` con addon presente (llama clear+refresh), sin addon (solo
   refresh), con addon cuyo clear lanza (traga error, igual hace refresh).
-- [ ] Unit: `redrawActivePane` — sin pane activo → no-op; tab no-terminal → no-op.
-- [ ] Unit: la accion `terminal.redraw` existe en el registro con default `Mod+Alt+L`
-  y `allowInTerminal`.
-- [ ] Unit: FR-4 — el gancho de foreground limpia una vez por transicion; segundo
-  foreground sin transicion intermedia no repite (flag idempotente).
-- [ ] Unit: si se implementa como accion terminal-scoped, `resolveTerminalShortcutAction`
-  resuelve `terminal.redraw` correctamente.
+- [ ] Unit: `redrawActivePane` — sin pane activo → no-op.
+- [ ] Unit: la accion `terminal.redraw` existe en el registro con default `Mod+Alt+L`,
+  `group: 'Terminal Panes'`, `scope: 'terminal'` (sin `allowInTerminal`, igual que
+  `terminal.clear`).
+- [ ] Unit: `resolveTerminalShortcutAction` resuelve `terminal.redraw` (evento con
+  `metaKey+altKey` en darwin / `ctrlKey+altKey` en no-mac) → `{ type:
+  'redrawActivePane' }`.
 
 ## Design Decisions
 
