@@ -1900,6 +1900,7 @@ export type TuiAgent =
   | 'cursor' // Cursor
   | 'droid' // Factory Droid
   | 'kimi' // Kimi
+  | 'minimax' // MiniMax (Claude Code on MiniMax backend — fork)
   | 'mistral-vibe' // Mistral Vibe
   | 'qwen-code' // Qwen Code
   | 'rovo' // Rovo Dev

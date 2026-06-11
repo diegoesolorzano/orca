@@ -174,6 +174,7 @@ const ICONABLE_AGENT_TYPES: Record<TuiAgent, true> = {
   cursor: true,
   droid: true,
   kimi: true,
+  minimax: true,
   'mistral-vibe': true,
   'qwen-code': true,
   rovo: true,

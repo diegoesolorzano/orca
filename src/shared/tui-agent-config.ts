@@ -259,6 +259,17 @@ export const TUI_AGENT_CONFIG: Record<TuiAgent, TuiAgentConfig> = {
     expectedProcess: 'kimi',
     promptInjectionMode: 'stdin-after-start'
   },
+  minimax: {
+    // Why (fork): `minimax` is a wrapper that runs Claude Code against the
+    // MiniMax backend via `exec -a minimax claude`, so the foreground process
+    // is `minimax` and the prompt-injection surface is Claude's — it supports
+    // `--prefill` just like the `claude` agent.
+    detectCmd: 'minimax',
+    launchCmd: 'minimax',
+    expectedProcess: 'minimax',
+    promptInjectionMode: 'argv',
+    draftPromptFlag: '--prefill'
+  },
   'mistral-vibe': {
     // Why: Mistral's installer and PyPI package expose `vibe` even though the
     // package/project name is mistral-vibe. Keep the old name as an alias for

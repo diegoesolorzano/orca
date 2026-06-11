@@ -81,6 +81,7 @@ export const AGENT_KIND_VALUES = [
   'cursor',
   'droid',
   'kimi',
+  'minimax',
   'mistral-vibe',
   'qwen-code',
   'rovo',

@@ -38,6 +38,30 @@ Tests: `src/main/git/worktree-git-crypt.test.ts` (6 casos).
 Limitacion conocida: solo path local; el relay SSH (`src/relay/git-handler-worktree-ops.ts`)
 quedo sin cambios porque solo dispone de un ejecutor `git` (sin file ops remotas).
 
+## Parche de producto: agente `minimax` (y wrapper `kimi`)
+
+Reconocimiento en Orca de dos "agentes" que en realidad son **Claude Code apuntando a
+otro backend** vía wrappers en `~/.local/bin`:
+
+- `kimi`   → `exec -a kimi claude`     (backend api.kimi.com)
+- `minimax`→ `exec -a minimax claude`  (backend api.minimax.io, modelo MiniMax-M3)
+
+Clave: Orca reconoce el agente por el **nombre del proceso en foreground**
+(`getForegroundProcess` → `recognizeAgentProcess`). `exec -a <nombre>` fija `argv[0]`,
+así el proceso se llama `kimi`/`minimax` en vez de `claude` y Orca los distingue.
+
+- `kimi` ya existe en el catálogo upstream (`TUI_AGENT_CONFIG.kimi`) — no requirió código.
+- `minimax` es parche del fork. Archivos tocados (replican el patrón de `kimi`):
+  `src/shared/types.ts` (union `TuiAgent`), `src/shared/tui-agent-config.ts`
+  (`promptInjectionMode:'argv'` + `--prefill`, porque por debajo ES Claude Code),
+  `src/shared/agent-kind.ts`, `src/shared/telemetry-events.ts` (`AGENT_KIND_VALUES`),
+  `src/shared/tui-agent-selection.ts`, `src/renderer/src/lib/agent-catalog.tsx`,
+  `src/renderer/src/lib/agent-status.ts` (record de iconos).
+- NO se tocó el subsistema de rate-limits/cuotas (fetcher propio de cada proveedor):
+  MiniMax no expone esa API, así que no aparece en el panel de uso del status bar.
+- Genera conflicto menor de merge en `types.ts`/`tui-agent-config.ts` al traer upstream;
+  reaplicar la entrada `minimax`.
+
 ## Estado upstream
 
 - Issue original: stablyai/orca#4566 (de otro usuario, mismo problema)

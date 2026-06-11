@@ -212,6 +212,15 @@ export const getAgentCatalog = createLocalizedCatalog((): AgentCatalogEntry[] =>
     homepageUrl: 'https://www.kimi.com/code/docs/en/kimi-code-cli/getting-started.html'
   },
   {
+    // Why (fork): MiniMax = Claude Code on the MiniMax backend, launched via the
+    // `minimax` wrapper (`exec -a minimax claude`). Detected by process name.
+    id: 'minimax',
+    label: 'MiniMax',
+    cmd: 'minimax',
+    faviconDomain: 'minimax.io',
+    homepageUrl: 'https://www.minimax.io/'
+  },
+  {
     id: 'mistral-vibe',
     label: translate('auto.lib.agent.catalog.ca73055bd0', 'Mistral Vibe'),
     // Why: `uv tool install mistral-vibe` exposes the interactive CLI as
