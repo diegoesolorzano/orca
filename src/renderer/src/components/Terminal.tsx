@@ -339,6 +339,13 @@ function Terminal(): React.JSX.Element | null {
   // Window close confirmation dialog — shown for local terminals with running
   // child processes. SSH terminals detach/persist through the relay lifecycle.
   const [windowCloseDialogOpen, setWindowCloseDialogOpen] = useState(false)
+  // Why (fork): drives the quit-confirmation copy and the safe-cancel path.
+  // `isQuitting` tells a Cmd+Q quit apart from a plain window close, and
+  // `hasRunningProcesses` decides whether to warn about live local terminals.
+  const [windowCloseContext, setWindowCloseContext] = useState<{
+    isQuitting: boolean
+    hasRunningProcesses: boolean
+  }>({ isQuitting: false, hasRunningProcesses: false })
 
   // Why: when the main process requests a close while editor tabs are dirty, we
   // must not call confirmWindowClose() until the user saves or discards. The
@@ -351,34 +358,47 @@ function Terminal(): React.JSX.Element | null {
     // a dirty-tab preventDefault() does not fire during the initial quit IPC
     // (that path can emit will-prevent-unload and clear isQuitting in main).
     window.dispatchEvent(new Event('beforeunload'))
-    if (!isQuitting) {
-      const state = useAppStore.getState()
-      const localPtyIds = Object.entries(state.tabsByWorktree).flatMap(
-        ([worktreeId, worktreeTabs]) => {
-          const connectionId = getConnectionId(worktreeId)
-          if (connectionId !== null) {
-            return []
-          }
-          return worktreeTabs
-            .flatMap((tab) => state.ptyIdsByTabId[tab.id] ?? [])
-            .filter((ptyId) => !isRemoteRuntimePtyId(ptyId))
+    const state = useAppStore.getState()
+    const localPtyIds = Object.entries(state.tabsByWorktree).flatMap(
+      ([worktreeId, worktreeTabs]) => {
+        const connectionId = getConnectionId(worktreeId)
+        if (connectionId !== null) {
+          return []
         }
-      )
-      if (localPtyIds.length > 0) {
-        void Promise.all(localPtyIds.map((id) => window.api.pty.hasChildProcesses(id))).then(
-          (results) => {
-            if (results.some(Boolean)) {
-              setWindowCloseDialogOpen(true)
-            } else {
-              window.api.ui.confirmWindowClose()
-            }
-          }
-        )
-        return
+        return worktreeTabs
+          .flatMap((tab) => state.ptyIdsByTabId[tab.id] ?? [])
+          .filter((ptyId) => !isRemoteRuntimePtyId(ptyId))
+      }
+    )
+    // Why (fork): Cmd+Q (isQuitting) always asks for confirmation; a plain
+    // window close only confirms when a local terminal still has a running
+    // child process that would be terminated.
+    const finalize = (hasRunningProcesses: boolean): void => {
+      if (isQuitting || hasRunningProcesses) {
+        setWindowCloseContext({ isQuitting, hasRunningProcesses })
+        setWindowCloseDialogOpen(true)
+      } else {
+        window.api.ui.confirmWindowClose()
       }
     }
-    window.api.ui.confirmWindowClose()
+    if (localPtyIds.length > 0) {
+      void Promise.all(localPtyIds.map((id) => window.api.pty.hasChildProcesses(id))).then(
+        (results) => finalize(results.some(Boolean))
+      )
+    } else {
+      finalize(false)
+    }
   }, [])
+
+  const cancelWindowClose = useCallback(() => {
+    setWindowCloseDialogOpen(false)
+    if (windowCloseContext.isQuitting) {
+      // Why (fork): a cancelled Cmd+Q must clear main's isQuitting latch so a
+      // later window close isn't misclassified as a quit, and the deferred
+      // service teardown (rate-limits, agent-awake) never runs.
+      window.api.ui.abortWindowClose()
+    }
+  }, [windowCloseContext.isQuitting])
 
   const waitForFileClosed = useCallback((fileId: string, timeoutMs: number): Promise<boolean> => {
     if (!useAppStore.getState().openFiles.some((f) => f.id === fileId)) {
@@ -1876,29 +1896,36 @@ function Terminal(): React.JSX.Element | null {
         open={windowCloseDialogOpen}
         onOpenChange={(open) => {
           if (!open) {
-            setWindowCloseDialogOpen(false)
+            cancelWindowClose()
           }
         }}
       >
         <DialogContent className="max-w-sm" showCloseButton={false}>
           <DialogHeader>
             <DialogTitle className="text-sm">
-              {translate('auto.components.Terminal.2fa9c69ff3', 'Close Window?')}
+              {windowCloseContext.isQuitting
+                ? translate('fork.terminal.quitConfirm.title', 'Quit Orca?')
+                : translate('auto.components.Terminal.2fa9c69ff3', 'Close Window?')}
             </DialogTitle>
             <DialogDescription className="text-xs">
-              {translate(
-                'auto.components.Terminal.7958465754',
-                'There are local terminals with running processes. Close the window anyway?'
-              )}
+              {windowCloseContext.hasRunningProcesses
+                ? windowCloseContext.isQuitting
+                  ? translate(
+                      'fork.terminal.quitConfirm.running',
+                      'Local terminals still have running processes that will be terminated. Quit Orca anyway?'
+                    )
+                  : translate(
+                      'auto.components.Terminal.7958465754',
+                      'There are local terminals with running processes. Close the window anyway?'
+                    )
+                : translate(
+                    'fork.terminal.quitConfirm.idle',
+                    'Are you sure you want to quit Orca?'
+                  )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setWindowCloseDialogOpen(false)}
-            >
+            <Button type="button" variant="outline" size="sm" onClick={cancelWindowClose}>
               {translate('auto.components.Terminal.f82e9f02df', 'Cancel')}
             </Button>
             <Button
@@ -1911,7 +1938,9 @@ function Terminal(): React.JSX.Element | null {
                 window.api.ui.confirmWindowClose()
               }}
             >
-              {translate('auto.components.Terminal.73768427cf', 'Close')}
+              {windowCloseContext.isQuitting
+                ? translate('fork.terminal.quitConfirm.confirm', 'Quit')
+                : translate('auto.components.Terminal.73768427cf', 'Close')}
             </Button>
           </DialogFooter>
         </DialogContent>

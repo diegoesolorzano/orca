@@ -2299,6 +2299,8 @@ export type PreloadApi = {
     popupMenu: () => void
     onWindowCloseRequested: (callback: (data: { isQuitting: boolean }) => void) => () => void
     confirmWindowClose: () => void
+    /** Fork: cancel an in-flight Cmd+Q confirmation (clears main's isQuitting latch). */
+    abortWindowClose: () => void
   }
   runtime: {
     syncWindowGraph: (graph: RuntimeSyncWindowGraph) => Promise<RuntimeSyncWindowGraphResult>

@@ -3136,10 +3136,11 @@ const api = {
       ipcRenderer.send('menu:popup')
     },
     /** Fired by the main process when the user tries to close the window
-     *  (X button, Cmd+Q, etc.). Renderer should show a confirmation dialog
-     *  if terminals are still running, then call confirmWindowClose().
-     *  When isQuitting is true, the close was initiated by app.quit() (Cmd+Q)
-     *  and the renderer should skip the running-process dialog. */
+     *  (X button, Cmd+Q, etc.). Renderer shows a confirmation dialog, then
+     *  calls confirmWindowClose() (or abortWindowClose() on cancel). When
+     *  isQuitting is true the close came from app.quit() (Cmd+Q) and the
+     *  renderer always confirms (fork); otherwise it only confirms when a
+     *  local terminal still has a running process. */
     onWindowCloseRequested: (callback: (data: { isQuitting: boolean }) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, data: { isQuitting: boolean }) =>
         callback(data ?? { isQuitting: false })
@@ -3149,6 +3150,11 @@ const api = {
     /** Tell the main process to proceed with the window close. */
     confirmWindowClose: (): void => {
       ipcRenderer.send('window:confirm-close')
+    },
+    /** Fork: tell main a Cmd+Q confirmation was cancelled, so it clears the
+     *  isQuitting latch and skips the deferred service teardown. */
+    abortWindowClose: (): void => {
+      ipcRenderer.send('window:quit-aborted')
     }
   } satisfies PreloadApi['ui'],
 

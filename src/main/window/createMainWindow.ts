@@ -99,8 +99,9 @@ function syncTrafficLightPosition(win: BrowserWindow, zoomFactor: number): void 
 
 type CreateMainWindowOptions = {
   /** Returns true when a manual app.quit() (Cmd+Q) is in progress. The close
-   *  handler sends this to the renderer so it can skip the running-process
-   *  confirmation dialog and proceed directly to buffer capture + close. */
+   *  handler sends this to the renderer so it can show the quit-specific
+   *  confirmation (fork: Cmd+Q always confirms) instead of the window-close
+   *  path that only confirms when a local terminal has a running process. */
   getIsQuitting?: () => boolean
   /** Notifies the caller when the renderer vetoes unload. Why: a prevented
    *  beforeunload cancels the in-flight app.quit(), so the app-level quit
@@ -956,6 +957,13 @@ export function createMainWindow(
       mainWindow.close()
     }
   }
+  // Why (fork): a cancelled Cmd+Q confirmation clears the isQuitting latch so a
+  // later window close isn't treated as a quit and the deferred service
+  // teardown never runs. Mirrors the will-prevent-unload abort path.
+  const quitAbortedChannel = 'window:quit-aborted'
+  const onQuitAborted = (): void => {
+    opts?.onQuitAborted?.()
+  }
   const trafficLightChannel = 'ui:sync-traffic-lights'
   const onSyncTrafficLights = (_event: Electron.IpcMainEvent, zoomFactor: number): void => {
     syncTrafficLightPosition(mainWindow, zoomFactor)
@@ -1018,6 +1026,7 @@ export function createMainWindow(
   ipcMain.handle(isMaximizedChannel, onIsMaximized)
 
   ipcMain.on(confirmCloseChannel, onConfirmClose)
+  ipcMain.on(quitAbortedChannel, onQuitAborted)
   mainWindow.on('closed', () => {
     // Why: default-deny the Cmd+B carve-out after the window is gone so a
     // stale-true flag can't leak past subsequent state transitions. Paired
@@ -1035,6 +1044,7 @@ export function createMainWindow(
     ipcMain.removeListener(popupMenuChannel, onPopupMenu)
     ipcMain.removeHandler(isMaximizedChannel)
     ipcMain.removeListener(confirmCloseChannel, onConfirmClose)
+    ipcMain.removeListener(quitAbortedChannel, onQuitAborted)
     ipcMain.removeListener(markdownFocusChannel, onMarkdownEditorFocused)
     ipcMain.removeListener(terminalInputFocusChannel, onTerminalInputFocused)
     ipcMain.removeListener(floatingTerminalInputFocusChannel, onFloatingTerminalInputFocused)

@@ -62,6 +62,26 @@ así el proceso se llama `kimi`/`minimax` en vez de `claude` y Orca los distingu
 - Genera conflicto menor de merge en `types.ts`/`tui-agent-config.ts` al traer upstream;
   reaplicar la entrada `minimax`.
 
+## Parche de producto: confirmación al salir (Cmd+Q)
+
+Upstream salta a propósito el diálogo de cierre en Cmd+Q (`isQuitting`) — solo confirma
+al cerrar la ventana con la X y únicamente si hay procesos locales corriendo. El fork hace
+que **Cmd+Q siempre pida confirmación**, con **cancelación segura**.
+
+- Flujo: `app before-quit` → `window 'close'` (preventDefault) → IPC `window:close-requested`
+  `{isQuitting}` → el renderer muestra el diálogo → `window:confirm-close` (cerrar) o
+  `window:quit-aborted` (cancelar).
+- Cancelación segura: el teardown de servicios (`rateLimits.stop()`, `agentAwakeService`)
+  se movió de `before-quit` a `will-quit`, que solo corre en una salida real. `before-quit`
+  deja solo el latch reversible `isQuitting=true`; `window:quit-aborted` lo limpia vía
+  `onQuitAborted`. Así cancelar un Cmd+Q deja Orca 100% funcional.
+- Archivos: `src/renderer/src/components/Terminal.tsx` (diálogo + texto condicional +
+  `cancelWindowClose`), `src/preload/index.ts` + `api-types.ts` + `web/web-preload-api.ts`
+  (`abortWindowClose`), `src/main/window/createMainWindow.ts` (canal `window:quit-aborted`),
+  `src/main/index.ts` (teardown movido a `will-quit`).
+- Copias i18n nuevas usan claves `fork.terminal.quitConfirm.*` con fallback en inglés
+  (`translate` cae al fallback si la clave no existe; no rompe el pipeline i18n).
+
 ## Estado upstream
 
 - Issue original: stablyai/orca#4566 (de otro usuario, mismo problema)

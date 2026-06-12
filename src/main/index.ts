@@ -1452,17 +1452,13 @@ app.whenReady().then(async () => {
 })
 
 app.on('before-quit', () => {
+  // Why (fork): only set the (reversible) latch here — the close handler reads
+  // it to confirm Cmd+Q, and a cancelled quit clears it via onQuitAborted.
+  // Service teardown moved to will-quit so a cancelled Cmd+Q leaves
+  // rate-limits/agent-awake running instead of silently disabling them.
+  // PTY cleanup also stays in will-quit so the renderer can capture terminal
+  // scrollback before PTY exit events unmount TerminalPane capture callbacks.
   isQuitting = true
-  unsubscribeAgentAwakeStatusChanges?.()
-  unsubscribeAgentAwakeStatusChanges = null
-  agentAwakeService?.dispose()
-  agentAwakeService = null
-  // Why: PTY cleanup is deferred to will-quit so the renderer has a chance to
-  // capture terminal scrollback buffers before PTY exit events race in and
-  // unmount TerminalPane components (removing their capture callbacks).
-  // The window close handler passes isQuitting to the renderer so it skips the
-  // child-process confirmation dialog and proceeds directly to buffer capture.
-  rateLimits?.stop()
 })
 
 // Why: will-quit fires twice when daemon disconnect needs an async flush.
@@ -1476,6 +1472,14 @@ app.on('will-quit', (e) => {
   // are still running. killAllPty() does not call runtime.onPtyExit(),
   // so without this ordering, running agents would produce orphaned
   // agent_start events with no matching stops.
+  // Why (fork): moved here from before-quit so a cancelled Cmd+Q does not tear
+  // these down. will-quit only fires on an actual exit, and the `?.` guards
+  // keep it idempotent across will-quit's two-pass daemon-flush path.
+  unsubscribeAgentAwakeStatusChanges?.()
+  unsubscribeAgentAwakeStatusChanges = null
+  agentAwakeService?.dispose()
+  agentAwakeService = null
+  rateLimits?.stop()
   starNag?.stop()
   automations?.stop()
   setUnreadDockBadgeCount(0)
