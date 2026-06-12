@@ -117,15 +117,22 @@ open -a Orca
 
 ## Consideraciones del build propio
 
-- **Auto-updater: neutralizado a nivel UI (parche del fork).** El build del fork SI
-  recibe el feed de updates oficial de Stably y muestra la tarjeta "Update
-  Available" — se conserva a proposito como NOTIFICACION de releases upstream, pero
-  el boton de instalar fue removido (commit `feat(fork): disable in-app update
-  install...` en `UpdateCard.tsx`): instalarlo reemplazaria el build del fork por el
-  binario oficial y se perderian los parches locales. Actualizar SIEMPRE via el
-  flujo de abajo (skill `orca-fork-update`). Nota: Settings puede conservar su
-  propio boton de update — no usarlo. Neutralizacion del feed a nivel builder:
-  pendiente en `docs-fork/001-product-ideas.md` §003 (Chiwi nivel 1).
+- **Auto-updater: neutralizado funcionalmente (parche del fork).** El build SI
+  recibe el feed oficial y muestra "Update Available" — se conserva a proposito
+  como NOTIFICACION de releases upstream — pero NO descarga ni instala. Flag
+  unica: `src/shared/fork-build.ts` → `FORK_SELF_UPDATE_DISABLED`. Capas:
+  - `src/main/updater.ts`: `autoInstallOnAppQuit = !FORK_SELF_UPDATE_DISABLED`
+    (false) — nada se aplica al salir.
+  - `src/main/window/attach-main-window-services.ts`: IPC `updater:download` y
+    `updater:quitAndInstall` no-opean en modo fork (limite de entrada; la logica
+    core de updater.ts queda intacta para sus tests).
+  - UI: `UpdateCard.tsx` (`ForkUpdateNotice` + `handleUpdate` no-op) y
+    `GeneralUpdateSettingsSection.tsx` (oculta "Install Update"/"Restart to
+    Update", texto fork-aware).
+  Historico: la neutralizacion previa era SOLO el texto `ForkUpdateNotice`; el
+  boton de Settings seguia descargando (de ahi el "1.4.64 is ready"). Si quedo
+  algo staged, limpiar `~/Library/Caches/com.stablyai.orca.ShipIt`.
+  Actualizar SIEMPRE via skill `orca-fork-update` (merge + rebuild).
 - **Sin firma/notarizacion de Stably**: primera apertura puede requerir aprobacion en
   Ajustes → Privacidad y Seguridad (por eso el `xattr -dr com.apple.quarantine`).
 - **Version**: el build hereda la version del package.json upstream al momento del merge

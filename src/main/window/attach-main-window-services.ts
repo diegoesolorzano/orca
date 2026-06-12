@@ -23,6 +23,7 @@ import {
   setupAutoUpdater,
   dismissNudge
 } from '../updater'
+import { FORK_SELF_UPDATE_DISABLED } from '../../shared/fork-build'
 import { scheduleHistoryGc } from '../terminal-history'
 import { hydrateLocalPtyRegistryAtBoot } from '../memory/hydrate-local-pty-registry'
 import type { ClaudeRuntimeAuthPreparation } from '../claude-accounts/runtime-auth-service'
@@ -376,7 +377,21 @@ export function registerUpdaterHandlers(_store: Store): void {
   ipcMain.handle('updater:check', (_event, options?: { includePrerelease?: boolean }) =>
     checkForUpdatesFromMenu(options)
   )
-  ipcMain.handle('updater:download', () => downloadUpdate())
-  ipcMain.handle('updater:quitAndInstall', () => quitAndInstall())
+  // Why (fork): the renderer never reaches these in normal use (the UI hides
+  // the download/install actions), but gate the IPC boundary too so no path —
+  // stale renderer, devtools, future caller — can self-replace the patched app
+  // with the official release. Updates go through orca-fork-update.
+  ipcMain.handle('updater:download', () => {
+    if (FORK_SELF_UPDATE_DISABLED) {
+      return
+    }
+    downloadUpdate()
+  })
+  ipcMain.handle('updater:quitAndInstall', () => {
+    if (FORK_SELF_UPDATE_DISABLED) {
+      return
+    }
+    quitAndInstall()
+  })
   ipcMain.handle('updater:dismissNudge', () => dismissNudge())
 }

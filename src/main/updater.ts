@@ -25,6 +25,7 @@ import {
   getReleaseDownloadUrl
 } from './updater-prerelease-feed'
 import { fetchNudge, shouldApplyNudge } from './updater-nudge'
+import { FORK_SELF_UPDATE_DISABLED } from '../shared/fork-build'
 
 type CheckFailureSource = 'event' | 'promise' | 'fallback-promise'
 type MissingManifestPrereleaseFallbackResult = { userInitiated: boolean }
@@ -861,7 +862,10 @@ export function setupAutoUpdater(
 
   const autoUpdater = getAutoUpdater()
   autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = true
+  // Why (fork): never stage an official release for install-on-quit — it would
+  // overwrite /Applications/Orca.app and drop the local patches. The fork still
+  // checks + notifies; the user updates via orca-fork-update (merge + rebuild).
+  autoUpdater.autoInstallOnAppQuit = !FORK_SELF_UPDATE_DISABLED
 
   // Why: the only on-machine window we have into electron-updater. Without
   // this, an unexpected `update-not-available` (e.g. RC user not offered

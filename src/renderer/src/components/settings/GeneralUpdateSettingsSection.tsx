@@ -7,6 +7,7 @@ import { Button } from '../ui/button'
 import { SearchableSetting } from './SearchableSetting'
 import { SettingsSubsectionHeader } from './SettingsFormControls'
 import { translate } from '@/i18n/i18n'
+import { FORK_SELF_UPDATE_DISABLED } from '../../../../shared/fork-build'
 
 export function GeneralUpdateSettingsSection(): React.JSX.Element {
   const updateStatus = useAppStore((s) => s.updateStatus)
@@ -109,7 +110,9 @@ export function GeneralUpdateSettingsSection(): React.JSX.Element {
             )}
           </Button>
 
-          {updateStatus.state === 'available' ? (
+          {/* Fork: no install/download action — updates go through merge +
+              rebuild (orca-fork-update), never an official-binary self-replace. */}
+          {FORK_SELF_UPDATE_DISABLED ? null : updateStatus.state === 'available' ? (
             <Button
               variant="default"
               size="sm"
@@ -165,10 +168,15 @@ export function GeneralUpdateSettingsSection(): React.JSX.Element {
                 'Version'
               )}
               {updateStatus.version}{' '}
-              {translate(
-                'auto.components.settings.GeneralUpdateSettingsSection.8311da27ba',
-                'is available. Click "Install Update" to download and install it.'
-              )}{' '}
+              {FORK_SELF_UPDATE_DISABLED
+                ? translate(
+                    'fork.settings.update.available',
+                    'is available. This is a fork build — update by merging upstream and rebuilding (orca-fork-update), not from here.'
+                  )
+                : translate(
+                    'auto.components.settings.GeneralUpdateSettingsSection.8311da27ba',
+                    'is available. Click "Install Update" to download and install it.'
+                  )}{' '}
               <a
                 href={
                   updateStatus.releaseUrl ??

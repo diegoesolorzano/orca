@@ -9,6 +9,7 @@ import { Button } from './ui/button'
 import { Progress } from './ui/progress'
 import { AlertCircle, Check, Loader2, Minus, Network, RotateCw, X } from 'lucide-react'
 import type { ChangelogData } from '../../../shared/types'
+import { FORK_SELF_UPDATE_DISABLED } from '../../../shared/fork-build'
 import { translate } from '@/i18n/i18n'
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -293,6 +294,11 @@ export function UpdateCard() {
   const isRichMode = changelog?.release != null
 
   const handleUpdate = () => {
+    if (FORK_SELF_UPDATE_DISABLED) {
+      // Why (fork): no in-app download/install — main neutralizes it too, this
+      // just keeps the UI honest (no spinner that never resolves).
+      return
+    }
     hasStartedDownload.current = true
     // Why: clicking "Update" implies the user is not worried about interruption,
     // so dismiss the reassurance tip permanently.
