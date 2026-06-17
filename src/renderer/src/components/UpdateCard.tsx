@@ -509,6 +509,28 @@ export function UpdateCard() {
       )
     }
 
+    // ── Fork build: never show download/install UI ──────────────────
+    // Why (fork): in-app updates are disabled, so the downloading/progress/
+    // "ready to install" states don't apply. Any update state collapses to one
+    // clean "available upstream" notice that points to orca-fork-update.
+    if (
+      FORK_SELF_UPDATE_DISABLED &&
+      (status.state === 'available' ||
+        status.state === 'downloading' ||
+        status.state === 'downloaded')
+    ) {
+      return (
+        <SimpleCardContent
+          version={status.version}
+          releaseUrl={
+            ('releaseUrl' in status && status.releaseUrl) ||
+            releaseUrlForVersion(status.version)
+          }
+          onClose={handleDismissWithAnimation}
+        />
+      )
+    }
+
     // ── Downloaded state ─────────────────────────────────────────────
 
     if (status.state === 'downloaded') {
@@ -772,13 +794,9 @@ function SimpleCardContent({
       </div>
 
       <p className="text-sm text-muted-foreground">
-        {translate('auto.components.UpdateCard.05ad78a6d1', 'Orca v{{value0}} is ready.', {
+        {translate('fork.components.UpdateCard.available', 'Orca v{{value0}} is available upstream.', {
           value0: version
         })}
-      </p>
-
-      <p className="text-xs leading-relaxed text-muted-foreground">
-        {translate('auto.components.UpdateCard.fdd4a364fa', "Sessions won't be interrupted.")}
       </p>
 
       <button
