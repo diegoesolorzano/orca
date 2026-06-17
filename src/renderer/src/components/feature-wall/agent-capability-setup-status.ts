@@ -79,7 +79,10 @@ export function useAgentCapabilitySetupStatus(): AgentCapabilitySetupStatus {
     () => ({
       browserUse: getSkillInstallStatus(browserUseSkill),
       computerUse: getComputerUseInstallStatus(computerUseSkill, computerUsePermissionStatus),
-      orchestration: getSkillInstallStatus(orchestrationSkill)
+      orchestration: getSkillInstallStatus(orchestrationSkill),
+      // Why: linearTickets remains in the onboarding selection shape, but the
+      // generic feature wall must not become a Linear skill install surface.
+      linearTickets: getFeatureWallExcludedLinearTicketsStatus()
     }),
     [browserUseSkill, computerUsePermissionStatus, computerUseSkill, orchestrationSkill]
   )
@@ -97,7 +100,8 @@ export function getDefaultAgentCapabilitySetupSelection(
     computerUse:
       !readiness.computerUseSkillInstalled ||
       (!readiness.computerUseReady && !readiness.computerUseUnavailable),
-    orchestration: !readiness.orchestrationSkillInstalled
+    orchestration: !readiness.orchestrationSkillInstalled,
+    linearTickets: false
   }
 }
 
@@ -164,6 +168,13 @@ function getSkillInstallStatus(skill: {
   }
 }
 
+function getFeatureWallExcludedLinearTicketsStatus(): AgentCapabilityInstallStatus {
+  return {
+    label: '',
+    tone: 'pending'
+  }
+}
+
 function getComputerUseInstallStatus(
   skill: {
     installed: boolean
@@ -194,8 +205,14 @@ function getComputerUseInstallStatus(
     return {
       label:
         permissions.unavailableReason === 'web_client'
-          ? 'open Orca Desktop on this Mac'
-          : 'Unavailable in this build',
+          ? translate(
+              'auto.components.feature.wall.agent.capability.setup.status.4c8e1f92a7',
+              'open Orca Desktop on this Mac'
+            )
+          : translate(
+              'auto.components.feature.wall.agent.capability.setup.status.6d2b0a84e1',
+              'Unavailable in this build'
+            ),
       tone: 'pending',
       installed: true
     }

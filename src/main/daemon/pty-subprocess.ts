@@ -27,8 +27,21 @@ import { getWslContextFromSessionId } from './wsl-session-context'
 import { addOrcaWslInteropEnv } from '../pty/wsl-orca-env'
 import { isWindowsGitBashShellPath, resolveWindowsGitBashShellPath } from '../git-bash'
 import { WINDOWS_GIT_BASH_SHELL } from '../../shared/windows-terminal-shell'
+import { resolveAgentForegroundProcess } from '../providers/agent-foreground-process'
+import {
+  isAgentForegroundWrapperProcess,
+  recognizeAgentProcess,
+  recognizeAgentProcessFromCommandLine
+} from '../../shared/agent-process-recognition'
+import { isShellProcess } from '../../shared/shell-process-detection'
+import { parsePtySessionId } from './pty-session-id'
+import { getAgentForegroundContextPaths } from '../providers/agent-foreground-context-paths'
 
 const PANE_IDENTITY_ENV_KEYS = ['ORCA_PANE_KEY', 'ORCA_TAB_ID', 'ORCA_WORKTREE_ID'] as const
+const FOREGROUND_AGENT_CACHE_TTL_MS = 1000
+const SHELL_FOREGROUND_REFRESH_RETRY_MS = 5_000
+const STARTUP_AGENT_FOREGROUND_BOOTSTRAP_MS = 5_000
+const PTY_SPAWN_HEALTH_TIMEOUT_MS = 2_000
 
 export type PtySubprocessOptions = {
   sessionId: string
@@ -231,12 +244,94 @@ function formatPtySpawnError(err: unknown, shellPath: string, spawnCwd: string):
   return formatted
 }
 
+export async function checkPtySpawnHealth(): Promise<void> {
+  if (process.platform !== 'darwin') {
+    return
+  }
+
+  ensureNodePtySpawnHelperExecutable()
+  preflightMacNodePtySpawnEnvironment()
+
+  const cwd = isExistingDirectory(process.env.ORCA_USER_DATA_PATH)
+    ? process.env.ORCA_USER_DATA_PATH
+    : getDefaultCwd()
+
+  let proc: pty.IPty
+  try {
+    proc = pty.spawn('/bin/sh', ['-c', 'exit 0'], {
+      name: 'xterm-256color',
+      cols: 2,
+      rows: 1,
+      cwd,
+      env: {
+        ...process.env,
+        TERM: 'xterm-256color'
+      }
+    })
+  } catch (err) {
+    throw formatPtySpawnError(err, '/bin/sh', cwd)
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false
+    let exitDisposable: { dispose(): void } | undefined
+    const finish = (error?: Error, opts?: { kill?: boolean }): void => {
+      if (settled) {
+        return
+      }
+      settled = true
+      clearTimeout(timer)
+      exitDisposable?.dispose()
+      if (opts?.kill) {
+        try {
+          proc.kill()
+        } catch {
+          // Best-effort cleanup for a short-lived health probe.
+        }
+      }
+      if (error) {
+        reject(error)
+        return
+      }
+      resolve()
+    }
+    const timer = setTimeout(() => {
+      finish(new Error(`PTY spawn health check timed out after ${PTY_SPAWN_HEALTH_TIMEOUT_MS}ms`), {
+        kill: true
+      })
+    }, PTY_SPAWN_HEALTH_TIMEOUT_MS)
+
+    // Why: ping only proves the daemon protocol is alive. A real short-lived
+    // PTY spawn catches stale node-pty helper paths captured by this process.
+    exitDisposable = proc.onExit(({ exitCode }) => {
+      if (exitCode === 0) {
+        finish()
+        return
+      }
+      finish(new Error(`PTY spawn health check exited with code ${exitCode}`))
+    })
+  })
+}
+
 function normalizeForegroundProcessName(processName: string | null | undefined): string | null {
   const trimmed = processName?.trim().replace(/^["']|["']$/g, '') ?? ''
   if (!trimmed || trimmed === 'xterm-256color') {
     return null
   }
   return trimmed.split(/[\\/]/).pop() || null
+}
+
+function resolveFallbackForegroundProcess(
+  processName: string | null | undefined,
+  shellPath: string
+): string | null {
+  const normalized = normalizeForegroundProcessName(processName)
+  if (normalized || process.platform !== 'win32') {
+    return normalized
+  }
+  // Why: Windows node-pty can report the terminal name instead of the shell.
+  // Use the spawned shell so shell-rooted foreground enrichment still runs.
+  return normalizeForegroundProcessName(pathWin32.basename(shellPath))
 }
 
 export function createPtySubprocess(opts: PtySubprocessOptions): SubprocessHandle {
@@ -462,8 +557,97 @@ export function createPtySubprocess(opts: PtySubprocessOptions): SubprocessHandl
   let dead = false
   let disposed = false
   let nodePtyKillIssued = false
+  let cachedAgentForeground: { processName: string; refreshedAt: number } | null = null
+  const agentForegroundContextPaths = getAgentForegroundContextPaths({
+    cwd: opts.cwd,
+    worktreeId: parsePtySessionId(opts.sessionId).worktreeId
+  })
+  const startupAgentRecognition = recognizeAgentProcessFromCommandLine(opts.command)
+  let startupAgentForeground: { processName: string; expiresAt: number } | null =
+    startupAgentRecognition
+      ? {
+          processName: startupAgentRecognition.processName,
+          expiresAt: Date.now() + STARTUP_AGENT_FOREGROUND_BOOTSTRAP_MS
+        }
+      : null
+  let foregroundRefreshInFlight = false
+  let lastForegroundRefreshStartedAt = 0
+  const getFallbackForegroundProcess = (): string | null =>
+    resolveFallbackForegroundProcess(proc.process, shellPath)
+  const getActiveStartupAgentForeground = (
+    now = Date.now()
+  ): { processName: string; expiresAt: number } | null => {
+    if (!startupAgentForeground) {
+      return null
+    }
+    if (now > startupAgentForeground.expiresAt) {
+      startupAgentForeground = null
+      return null
+    }
+    return startupAgentForeground
+  }
+  const shouldInspectFallbackForegroundProcess = (fallbackProcess: string | null): boolean =>
+    fallbackProcess !== null &&
+    (isShellProcess(fallbackProcess) || isAgentForegroundWrapperProcess(fallbackProcess))
+  const scheduleAgentForegroundRefresh = (fallbackProcess: string | null): void => {
+    if (dead || !proc.pid) {
+      return
+    }
+    const fallbackIsShell = fallbackProcess !== null && isShellProcess(fallbackProcess)
+    if (
+      !fallbackProcess ||
+      recognizeAgentProcess(fallbackProcess) ||
+      !shouldInspectFallbackForegroundProcess(fallbackProcess)
+    ) {
+      return
+    }
+    const now = Date.now()
+    const retryMs =
+      fallbackIsShell && !getActiveStartupAgentForeground(now) && !cachedAgentForeground
+        ? SHELL_FOREGROUND_REFRESH_RETRY_MS
+        : FOREGROUND_AGENT_CACHE_TTL_MS
+    if (foregroundRefreshInFlight || now - lastForegroundRefreshStartedAt < retryMs) {
+      return
+    }
+    foregroundRefreshInFlight = true
+    lastForegroundRefreshStartedAt = now
+    // Why: daemon foreground reads are sync and run on the IPC hot path.
+    // Refresh shell/wrapper-derived identities (powershell/node -> codex/etc.)
+    // in the background and serve them from a short cache on later reads.
+    void resolveAgentForegroundProcess(proc.pid, fallbackProcess, {
+      contextPaths: agentForegroundContextPaths
+    })
+      .then((processName) => {
+        if (dead) {
+          return
+        }
+        if (!processName || !recognizeAgentProcess(processName)) {
+          const currentFallbackProcess = getFallbackForegroundProcess()
+          if (
+            fallbackIsShell &&
+            !getActiveStartupAgentForeground() &&
+            currentFallbackProcess !== null &&
+            isShellProcess(currentFallbackProcess)
+          ) {
+            cachedAgentForeground = null
+            startupAgentForeground = null
+          }
+          return
+        }
+        cachedAgentForeground = { processName, refreshedAt: Date.now() }
+        startupAgentForeground = null
+      })
+      .catch(() => {
+        // Best-effort only: foreground enrichment must never affect PTY health.
+      })
+      .finally(() => {
+        foregroundRefreshInFlight = false
+      })
+  }
   proc.onExit(() => {
     dead = true
+    cachedAgentForeground = null
+    startupAgentForeground = null
     // Why: UnixTerminal.destroy() registers `_socket.once('close', () => this.kill('SIGHUP'))`
     // (unixTerminal.js:219-229). After the child exits, the master socket's
     // 'close' event can fire before our dispose() path gets to neutralize
@@ -489,7 +673,25 @@ export function createPtySubprocess(opts: PtySubprocessOptions): SubprocessHandl
         return null
       }
       try {
-        return normalizeForegroundProcessName(proc.process)
+        const fallbackProcess = getFallbackForegroundProcess()
+        if (fallbackProcess && recognizeAgentProcess(fallbackProcess)) {
+          cachedAgentForeground = { processName: fallbackProcess, refreshedAt: Date.now() }
+          startupAgentForeground = null
+          return fallbackProcess
+        }
+        scheduleAgentForegroundRefresh(fallbackProcess)
+        const now = Date.now()
+        if (
+          cachedAgentForeground &&
+          now - cachedAgentForeground.refreshedAt <= FOREGROUND_AGENT_CACHE_TTL_MS
+        ) {
+          return cachedAgentForeground.processName
+        }
+        const activeStartupAgentForeground = getActiveStartupAgentForeground(now)
+        if (fallbackProcess && isShellProcess(fallbackProcess) && activeStartupAgentForeground) {
+          return activeStartupAgentForeground.processName
+        }
+        return fallbackProcess
       } catch {
         return null
       }

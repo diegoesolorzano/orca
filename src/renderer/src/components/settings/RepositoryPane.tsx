@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import type { OrcaHooks, Repo, RepoHookSettings } from '../../../../shared/types'
 import { getRepoKindLabel, isFolderRepo } from '../../../../shared/repo-kind'
 import { Button } from '../ui/button'
-import { Input } from '../ui/input'
 import { Label } from '../ui/label'
 import { Separator } from '../ui/separator'
 import { Trash2 } from 'lucide-react'
@@ -19,6 +18,9 @@ import { useAppStore } from '../../store'
 import { getRepositoryIconSectionId } from './repository-settings-targets'
 import { RepositoryIconPicker } from './RepositoryIconPicker'
 import { getRepositoryPaneSearchEntries } from './repository-search'
+import { RepositoryHostSetupsSection } from './RepositoryHostSetupsSection'
+import { RepoSettingsDraftInput } from './RepositorySettingsDraftInput'
+import { RepositoryForkSyncSection } from './RepositoryForkSyncSection'
 import { translate } from '@/i18n/i18n'
 export { getRepositoryPaneSearchEntries }
 
@@ -34,61 +36,6 @@ type RepositoryPaneProps = {
   mayNeedUpdate: boolean
   updateRepo: (repoId: string, updates: RepositoryPaneRepoUpdate) => void
   removeProject: (repoId: string) => void
-}
-
-type RepoTextDraft = { repoId: string; text: string }
-
-// Why: updateRepo persists via async IPC before the store value updates, so a
-// store-controlled input resets mid-IME-composition (Hangul decomposes into
-// jamo). Keep keystrokes in local draft state; persist stays per-keystroke.
-export function RepoSettingsDraftInput({
-  repoId,
-  storeValue,
-  onTextChange,
-  ...inputProps
-}: {
-  repoId: string
-  storeValue: string
-  onTextChange: (text: string) => void
-} & Omit<React.ComponentProps<typeof Input>, 'value' | 'onChange'>): React.JSX.Element {
-  const [draft, setDraft] = useState<RepoTextDraft>({ repoId, text: storeValue })
-  const pendingStoreEchoesRef = useRef<string[]>([])
-
-  useEffect(() => {
-    setDraft((current) => {
-      if (current.repoId !== repoId) {
-        pendingStoreEchoesRef.current = []
-        return { repoId, text: storeValue }
-      }
-      if (storeValue === current.text) {
-        pendingStoreEchoesRef.current = []
-        return current
-      }
-      const pendingEchoIndex = pendingStoreEchoesRef.current.indexOf(storeValue)
-      if (pendingEchoIndex !== -1) {
-        // Why: queued updateRepo calls can echo older input text after newer
-        // keystrokes; accepting that echo re-cancels active IME composition.
-        pendingStoreEchoesRef.current.splice(0, pendingEchoIndex + 1)
-        return current
-      }
-      pendingStoreEchoesRef.current = []
-      return { repoId, text: storeValue }
-    })
-  }, [repoId, storeValue])
-
-  const text = draft.repoId === repoId ? draft.text : storeValue
-  return (
-    <Input
-      {...inputProps}
-      value={text}
-      onChange={(e) => {
-        const nextText = e.target.value
-        pendingStoreEchoesRef.current.push(nextText)
-        setDraft({ repoId, text: nextText })
-        onTextChange(nextText)
-      }}
-    />
-  )
 }
 
 export function matchesRepositoryIdentitySearch(query: string, repo: Repo): boolean {
@@ -177,15 +124,18 @@ export function RepositoryPane({
   }
 
   const allEntries = getRepositoryPaneSearchEntries(repo)
-  const identityEntries = allEntries.filter((entry) =>
-    [
-      'Display Name',
-      'Project Icon',
-      'Default Worktree Base',
-      'Worktree Location',
-      'Remove Project'
-    ].includes(entry.title)
-  )
+  const identityEntryTitles = new Set([
+    translate('auto.components.settings.repository.search.7e1e456a95', 'Display Name'),
+    translate('auto.components.settings.repository.search.b24f00294a', 'Project Icon'),
+    translate(
+      'auto.components.settings.repository.search.keepForkUpToDate',
+      'Keep Fork Up to Date'
+    ),
+    translate('auto.components.settings.repository.search.094adbe930', 'Default Worktree Base'),
+    translate('auto.components.settings.repository.search.443d127b5a', 'Worktree Location'),
+    translate('auto.components.settings.repository.search.c5266c2c9d', 'Remove Project')
+  ])
+  const identityEntries = allEntries.filter((entry) => identityEntryTitles.has(entry.title))
   const sparsePresetEntries = allEntries.filter((entry) =>
     ['Sparse Checkout Presets'].includes(entry.title)
   )
@@ -201,6 +151,7 @@ export function RepositoryPane({
   const mcpEntries = allEntries.filter((entry) => entry.title === 'MCP Configs')
   const symlinkEntries = allEntries.filter((entry) => entry.title === 'Worktree Symlinks')
   const sourceControlAiEntries = allEntries.filter((entry) => entry.title === 'Git AI Author')
+  const hostSetupEntries = allEntries.filter((entry) => entry.title === 'Available Hosts')
   const removeProjectLabel =
     confirmingRemove === repo.id ? 'Confirm Remove Project' : 'Remove Project'
 
@@ -330,6 +281,19 @@ export function RepositoryPane({
 
         {!isFolder ? (
           <>
+            <RepositoryHostSetupsSection
+              repo={repo}
+              forceVisible={forceFullPaneForRepoMatch}
+              searchQuery={searchQuery}
+              searchEntries={hostSetupEntries}
+            />
+
+            <RepositoryForkSyncSection
+              repo={repo}
+              updateRepo={updateRepo}
+              forceVisible={forceFullPaneForRepoMatch}
+            />
+
             <SearchableSetting
               title={translate(
                 'auto.components.settings.RepositoryPane.f88db4fece',

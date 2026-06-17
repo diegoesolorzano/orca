@@ -14,6 +14,9 @@ import {
 import type { SourceControlTextActionId } from '../../../../shared/source-control-ai-actions'
 import type { GlobalSettings, Repo } from '../../../../shared/types'
 import type { SourceControlAiWriteTarget } from '../../../../shared/source-control-ai-recipe-save'
+import { buildBranchNamePrompt } from '../../../../shared/branch-name-from-work'
+import { buildCommitMessagePrompt } from '../../../../shared/commit-message-generation'
+import { buildPullRequestFieldsPrompt } from '../../../../shared/pull-request-generation'
 import {
   SourceControlTextGenerationDialogForm,
   type SourceControlTextGenerationSaveTarget
@@ -40,6 +43,40 @@ type SourceControlTextGenerationDialogProps = SourceControlTextGenerationBaseDia
   title: string
   description: string
   generateLabel: string
+}
+
+function buildBasePromptPreview(actionId: SourceControlTextActionId): string {
+  switch (actionId) {
+    case 'commitMessage':
+      return buildCommitMessagePrompt(
+        {
+          branch: 'feature/example',
+          stagedSummary: 'M src/example.ts',
+          stagedPatch: 'diff --git a/src/example.ts b/src/example.ts\n+addSourceControlAiPreview()'
+        },
+        ''
+      )
+    case 'pullRequest':
+      return buildPullRequestFieldsPrompt(
+        {
+          branch: 'feature/example',
+          base: 'main',
+          branchChangedByPreparation: false,
+          currentTitle: 'Draft title',
+          currentBody: 'Draft description',
+          currentDraft: false,
+          commitSummary: 'a1b2c3d Add Source Control AI prompt previews',
+          changeSummary: 'src/example.ts | 12 ++++++++++--',
+          patch: 'diff --git a/src/example.ts b/src/example.ts\n+addSourceControlAiPreview()'
+        },
+        ''
+      )
+    case 'branchName':
+      return buildBranchNamePrompt({
+        firstPrompt: 'Add source-control AI prompt previews',
+        assistantMessage: 'I will update the generation dialog variable chip preview.'
+      })
+  }
 }
 
 export function SourceControlTextGenerationDialog({
@@ -141,6 +178,7 @@ export function SourceControlTextGenerationDialog({
           settings={settings}
           repo={repo ?? null}
           baseParams={baseParams}
+          basePromptPreview={buildBasePromptPreview(actionId)}
           saveTargets={saveTargets}
           onGenerate={onGenerate}
           onOpenChange={onOpenChange}

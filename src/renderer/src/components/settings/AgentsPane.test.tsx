@@ -7,12 +7,13 @@ import { getDefaultSettings } from '../../../../shared/constants'
 import type { GlobalSettings, TuiAgent } from '../../../../shared/types'
 import { AGENT_CATALOG } from '@/lib/agent-catalog'
 import { useAppStore } from '../../store'
-import { AGENT_GENERATED_TAB_TITLES_TITLE } from './agent-generated-tab-title-copy'
-import { AGENT_STATUS_HOOKS_TITLE } from './agent-status-hooks-copy'
-import { getAgentAwakeDescription } from './agent-awake-copy'
+import { getAgentGeneratedTabTitlesTitle } from './agent-generated-tab-title-copy'
+import { getAgentStatusHooksTitle } from './agent-status-hooks-copy'
+import { getAgentAwakeDescription, getAgentAwakeTitle } from './agent-awake-copy'
 import { AgentAwakeSetting } from './AgentAwakeSetting'
 import {
   AgentAvailabilityControl,
+  AgentPermissionsSetting,
   AgentGeneratedTabTitlesSetting,
   AgentStatusHooksSetting,
   AgentsPane,
@@ -21,6 +22,7 @@ import {
   createAgentAvailabilityUpdateQueue
 } from './AgentsPane'
 import { matchesSettingsSearch } from './settings-search'
+import { TooltipProvider } from '../ui/tooltip'
 
 const detectedAgentsMock = vi.hoisted(() => ({
   detectedIds: ['claude'] as TuiAgent[] | null,
@@ -64,11 +66,15 @@ function renderPane(
   props: Partial<React.ComponentProps<typeof AgentsPane>> = {}
 ): string {
   return renderToStaticMarkup(
-    React.createElement(AgentsPane, {
-      settings,
-      updateSettings: vi.fn(),
-      ...props
-    })
+    React.createElement(
+      TooltipProvider,
+      null,
+      React.createElement(AgentsPane, {
+        settings,
+        updateSettings: vi.fn(),
+        ...props
+      })
+    )
   )
 }
 
@@ -182,8 +188,9 @@ describe('AgentsPane', () => {
       updateSettings
     })
 
-    const keepAwakeSwitch = findSwitch(element, 'Keep computer awake while agents are working')
-    expect(keepAwakeSwitch.props['aria-label']).toBe('Keep computer awake while agents are working')
+    const keepAwakeTitle = getAgentAwakeTitle()
+    const keepAwakeSwitch = findSwitch(element, keepAwakeTitle)
+    expect(keepAwakeSwitch.props['aria-label']).toBe(keepAwakeTitle)
     expect(keepAwakeSwitch.props['aria-checked']).toBe(false)
 
     const onClick = keepAwakeSwitch.props.onClick as () => void
@@ -204,7 +211,7 @@ describe('AgentsPane', () => {
       updateSettings
     })
 
-    const statusSwitch = findSwitchRow(element, AGENT_STATUS_HOOKS_TITLE)
+    const statusSwitch = findSwitchRow(element, getAgentStatusHooksTitle())
     expect(statusSwitch.props.checked).toBe(true)
 
     const onChange = statusSwitch.props.onChange as () => void
@@ -225,7 +232,7 @@ describe('AgentsPane', () => {
       updateSettings
     })
 
-    const generatedTitleSwitch = findSwitchRow(element, AGENT_GENERATED_TAB_TITLES_TITLE)
+    const generatedTitleSwitch = findSwitchRow(element, getAgentGeneratedTabTitlesTitle())
     expect(generatedTitleSwitch.props.checked).toBe(false)
 
     const onChange = generatedTitleSwitch.props.onChange as () => void
@@ -256,6 +263,30 @@ describe('AgentsPane', () => {
   it('includes enable and hide search metadata for agent visibility', () => {
     expect(matchesSettingsSearch('disable', getAgentsPaneSearchEntries())).toBe(true)
     expect(matchesSettingsSearch('hide', getAgentsPaneSearchEntries())).toBe(true)
+  })
+
+  it('includes agent permission search metadata', () => {
+    expect(matchesSettingsSearch('permission', getAgentsPaneSearchEntries())).toBe(true)
+    expect(matchesSettingsSearch('yolo', getAgentsPaneSearchEntries())).toBe(true)
+    expect(matchesSettingsSearch('manual', getAgentsPaneSearchEntries())).toBe(true)
+  })
+
+  it('applies the selected agent permission mode from settings without a mixed segment', () => {
+    const onChange = vi.fn()
+    const element = AgentPermissionsSetting({ mode: 'mixed', onChange })
+    const props = element.props.children.props.action.props as {
+      value: 'yolo'
+      onChange: (value: 'yolo' | 'manual' | 'mixed') => void
+      options: { value: string }[]
+    }
+
+    expect(props.value).toBe('yolo')
+    expect(props.options.map((option) => option.value)).toEqual(['yolo', 'manual'])
+    props.onChange('mixed')
+    expect(onChange).not.toHaveBeenCalled()
+
+    props.onChange('manual')
+    expect(onChange).toHaveBeenCalledWith('manual')
   })
 
   it('keeps catalog agent ids, labels, and commands discoverable in settings search', () => {

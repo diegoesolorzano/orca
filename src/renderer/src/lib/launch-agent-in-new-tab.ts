@@ -10,11 +10,16 @@ import { CLIENT_PLATFORM } from '@/lib/new-workspace'
 import { reconcileTabOrder } from '@/components/tab-bar/reconcile-order'
 import { track, tuiAgentToAgentKind } from '@/lib/telemetry'
 import { pasteDraftWhenAgentReady } from '@/lib/agent-paste-draft'
+import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import {
   createWebRuntimeSessionTerminal,
   isWebRuntimeSessionActive,
   isWebTerminalSurfaceTabId
 } from '@/runtime/web-runtime-session'
+import {
+  resolveTuiAgentLaunchArgs,
+  resolveTuiAgentLaunchEnv
+} from '../../../shared/tui-agent-launch-defaults'
 import { TUI_AGENT_CONFIG } from '../../../shared/tui-agent-config'
 import { makePaneKey } from '../../../shared/stable-pane-id'
 import type { TuiAgent } from '../../../shared/types'
@@ -135,6 +140,11 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
   } = args
   const store = useAppStore.getState()
   const cmdOverrides = store.settings?.agentCmdOverrides ?? {}
+  const effectiveAgentArgs =
+    agentArgs !== undefined
+      ? agentArgs
+      : resolveTuiAgentLaunchArgs(agent, store.settings?.agentDefaultArgs)
+  const agentEnv = resolveTuiAgentLaunchEnv(agent, store.settings?.agentDefaultEnv)
   const trimmedPrompt = prompt?.trim() ?? ''
   const hasPrompt = trimmedPrompt.length > 0
   const isFollowupPath = TUI_AGENT_CONFIG[agent].promptInjectionMode === 'stdin-after-start'
@@ -157,7 +167,8 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
       prompt: '',
       cmdOverrides,
       platform: launchPlatform,
-      agentArgs,
+      agentArgs: effectiveAgentArgs,
+      agentEnv,
       allowEmptyPromptLaunch: true
     })
     pasteDraftAfterLaunch = trimmedPrompt
@@ -169,7 +180,8 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
       draft: trimmedPrompt,
       cmdOverrides,
       platform: launchPlatform,
-      agentArgs
+      agentArgs: effectiveAgentArgs,
+      agentEnv
     })
     if (draftLaunchPlan && canUseInlineDraftLaunchPlan(draftLaunchPlan, launchPlatform)) {
       startupPlan = {
@@ -185,7 +197,8 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
         prompt: '',
         cmdOverrides,
         platform: launchPlatform,
-        agentArgs,
+        agentArgs: effectiveAgentArgs,
+        agentEnv,
         allowEmptyPromptLaunch: true
       })
       pasteDraftAfterLaunch = trimmedPrompt
@@ -196,7 +209,8 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
       prompt: '',
       cmdOverrides,
       platform: launchPlatform,
-      agentArgs,
+      agentArgs: effectiveAgentArgs,
+      agentEnv,
       allowEmptyPromptLaunch: true
     })
     pasteDraftAfterLaunch = trimmedPrompt
@@ -206,7 +220,8 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
       prompt: hasPrompt ? trimmedPrompt : '',
       cmdOverrides,
       platform: launchPlatform,
-      agentArgs,
+      agentArgs: effectiveAgentArgs,
+      agentEnv,
       allowEmptyPromptLaunch: !hasPrompt
     })
   }
@@ -215,7 +230,7 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
     return null
   }
 
-  const runtimeEnvironmentId = store.settings?.activeRuntimeEnvironmentId?.trim()
+  const runtimeEnvironmentId = getRuntimeEnvironmentIdForWorktree(store, worktreeId)
   if (isWebRuntimeSessionActive(runtimeEnvironmentId) && pasteDraftAfterLaunch === null) {
     // Why: paired web tabs are host-owned and return tabId: null on success.
     // Local-only agent tabs cannot be closed because close routes through

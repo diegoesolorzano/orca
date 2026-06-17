@@ -6,15 +6,16 @@ import { useAppStore } from '../../store'
 import { getGitPaneSearchEntries } from './git-search'
 import { SearchableSetting } from './SearchableSetting'
 import { matchesSettingsSearch } from './settings-search'
-import { GitHubRateLimitPanel } from '../github/github-rate-limit-display'
-import { GitLabRateLimitPanel } from '../gitlab/gitlab-rate-limit-display'
 import { AutoRenameBranchFromWorkSetting } from './AutoRenameBranchFromWorkSetting'
 import { getAutoRenameBranchSearchEntries } from './auto-rename-branch-search'
+import {
+  KEEP_LOCAL_MAIN_UP_TO_DATE_SECTION_ID,
+  getKeepLocalMainUpToDateTitle
+} from './keep-local-main-up-to-date-setting'
 import { translate } from '@/i18n/i18n'
 
 export { getGitPaneSearchEntries }
 
-const KEEP_LOCAL_MAIN_UP_TO_DATE_TITLE = 'Keep Local Main Up to Date'
 const KEEP_LOCAL_MAIN_UP_TO_DATE_DESCRIPTION =
   'When you create a workspace, Orca refreshes the remote base and safely fast-forwards your matching local branch, such as main or master. This keeps commands like git diff main...HEAD from comparing against stale history. Orca skips the update if that branch has uncommitted changes or local-only commits.'
 const KEEP_LOCAL_MAIN_UP_TO_DATE_KEYWORDS = [
@@ -65,6 +66,7 @@ export function GitPane({
 }: GitPaneProps): React.JSX.Element {
   const storeSearchQuery = useAppStore((s) => s.settingsSearchQuery)
   const searchQuery = settingsSearchQuery ?? storeSearchQuery
+  const keepLocalMainUpToDateTitle = getKeepLocalMainUpToDateTitle()
 
   const visibleSections = [
     matchesSettingsSearch(searchQuery, {
@@ -140,19 +142,20 @@ export function GitPane({
       </SearchableSetting>
     ) : null,
     matchesSettingsSearch(searchQuery, {
-      title: KEEP_LOCAL_MAIN_UP_TO_DATE_TITLE,
+      title: keepLocalMainUpToDateTitle,
       description: KEEP_LOCAL_MAIN_UP_TO_DATE_DESCRIPTION,
       keywords: KEEP_LOCAL_MAIN_UP_TO_DATE_KEYWORDS
     }) ? (
       <SearchableSetting
         key="refresh-base-ref"
-        title={KEEP_LOCAL_MAIN_UP_TO_DATE_TITLE}
+        id={KEEP_LOCAL_MAIN_UP_TO_DATE_SECTION_ID}
+        title={keepLocalMainUpToDateTitle}
         description={KEEP_LOCAL_MAIN_UP_TO_DATE_DESCRIPTION}
         keywords={KEEP_LOCAL_MAIN_UP_TO_DATE_KEYWORDS}
         className="flex items-center justify-between gap-4 py-2"
       >
         <div className="space-y-0.5">
-          <Label>{KEEP_LOCAL_MAIN_UP_TO_DATE_TITLE}</Label>
+          <Label>{keepLocalMainUpToDateTitle}</Label>
           <p className="text-xs text-muted-foreground">
             {translate(
               'auto.components.settings.GitPane.976afc6b3e',
@@ -204,59 +207,6 @@ export function GitPane({
         branchPromptDiscardSignal={branchPromptDiscardSignal}
         settingsSearchQuery={searchQuery}
       />
-    ) : null,
-    matchesSettingsSearch(searchQuery, {
-      title: translate('auto.components.settings.GitPane.612a440e57', 'GitHub API Budget'),
-      description: translate(
-        'auto.components.settings.GitPane.aa204f185f',
-        'Current GitHub CLI REST, Search, and GraphQL rate limits.'
-      ),
-      keywords: [
-        translate('auto.components.settings.GitPane.32dca11189', 'github'),
-        translate('auto.components.settings.GitPane.895d3f70b8', 'gh'),
-        translate('auto.components.settings.GitPane.2cde9044a8', 'graphql'),
-        translate('auto.components.settings.GitPane.b9c011fbc2', 'rate limit'),
-        translate('auto.components.settings.GitPane.cdd793134e', 'api budget')
-      ]
-    }) ? (
-      <SearchableSetting
-        key="github-api-budget"
-        title={translate('auto.components.settings.GitPane.612a440e57', 'GitHub API Budget')}
-        description={translate(
-          'auto.components.settings.GitPane.aa204f185f',
-          'Current GitHub CLI REST, Search, and GraphQL rate limits.'
-        )}
-        keywords={['github', 'gh', 'graphql', 'rate limit', 'api budget']}
-        className="space-y-3"
-      >
-        <GitHubRateLimitPanel />
-      </SearchableSetting>
-    ) : null,
-    matchesSettingsSearch(searchQuery, {
-      title: translate('auto.components.settings.GitPane.0de4ae556c', 'GitLab API Budget'),
-      description: translate(
-        'auto.components.settings.GitPane.c4f610d057',
-        'Current GitLab CLI REST rate-limit headers when available.'
-      ),
-      keywords: [
-        translate('auto.components.settings.GitPane.8a527d48e3', 'gitlab'),
-        translate('auto.components.settings.GitPane.3072428ac7', 'glab'),
-        translate('auto.components.settings.GitPane.b9c011fbc2', 'rate limit'),
-        translate('auto.components.settings.GitPane.cdd793134e', 'api budget')
-      ]
-    }) ? (
-      <SearchableSetting
-        key="gitlab-api-budget"
-        title={translate('auto.components.settings.GitPane.0de4ae556c', 'GitLab API Budget')}
-        description={translate(
-          'auto.components.settings.GitPane.c4f610d057',
-          'Current GitLab CLI REST rate-limit headers when available.'
-        )}
-        keywords={['gitlab', 'glab', 'rate limit', 'api budget']}
-        className="space-y-3"
-      >
-        <GitLabRateLimitPanel />
-      </SearchableSetting>
     ) : null,
     matchesSettingsSearch(searchQuery, {
       title: translate('auto.components.settings.GitPane.e02ea23a32', 'Orca Attribution'),

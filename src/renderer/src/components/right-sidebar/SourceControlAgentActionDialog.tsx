@@ -64,6 +64,7 @@ export function SourceControlAgentActionDialog(
   } = props
   const {
     handleOpenChange,
+    shouldRenderDialog,
     agentOptions,
     selectedAgent,
     hasEnabledAgents,
@@ -71,6 +72,7 @@ export function SourceControlAgentActionDialog(
     statusCopy,
     agentArgs,
     commandTemplate,
+    saveLaunchRecipe,
     saveTargetValue,
     saveTargets,
     settings,
@@ -81,45 +83,53 @@ export function SourceControlAgentActionDialog(
     onSelectedAgentChange,
     onAgentArgsChange,
     onCommandTemplateChange,
+    onSaveLaunchRecipeChange,
     onSaveAgentDefaultChange,
     handleStart
   } = useSourceControlAgentActionDialog(props)
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="min-w-0 overflow-x-hidden sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="text-sm">{title}</DialogTitle>
-          <DialogDescription className="text-xs">{description}</DialogDescription>
-        </DialogHeader>
-        <SourceControlAgentActionDialogForm
-          actionId={actionId}
-          agentOptions={agentOptions}
-          selectedAgent={selectedAgent}
-          hasEnabledAgents={hasEnabledAgents}
-          detecting={detecting}
-          statusCopy={statusCopy}
-          agentArgs={agentArgs}
-          commandTemplate={commandTemplate}
-          savedCommandInputTemplate={savedCommandInputTemplate}
-          baseCommandInput={baseCommandInput}
-          saveTargetValue={saveTargetValue}
-          saveTargets={saveTargets}
-          settings={settings}
-          repo={repo}
-          canSaveAgentDefault={Boolean(onSaveAgentDefault)}
-          deliveryPlan={deliveryPlan}
-          canStart={canStart}
-          isStarting={isStarting}
-          startLabel={startLabel}
-          onSelectedAgentChange={onSelectedAgentChange}
-          onAgentArgsChange={onAgentArgsChange}
-          onCommandTemplateChange={onCommandTemplateChange}
-          onSaveAgentDefaultChange={onSaveAgentDefaultChange}
-          onOpenSettings={onOpenSettings}
-          onStart={() => void handleStart()}
-        />
-      </DialogContent>
+      {/* Why: saved receipts auto-start in the background, so the fallback content
+          stays unmounted to avoid flashing a dialog the user already skipped. */}
+      {shouldRenderDialog ? (
+        <DialogContent className="flex max-h-[min(82vh,42rem)] min-w-0 flex-col overflow-hidden sm:max-w-2xl">
+          <DialogHeader className="shrink-0">
+            <DialogTitle className="text-sm">{title}</DialogTitle>
+            <DialogDescription className="text-xs">{description}</DialogDescription>
+          </DialogHeader>
+          <SourceControlAgentActionDialogForm
+            actionId={actionId}
+            baseCommandInput={baseCommandInput}
+            agentOptions={agentOptions}
+            selectedAgent={selectedAgent}
+            hasEnabledAgents={hasEnabledAgents}
+            detecting={detecting}
+            statusCopy={statusCopy}
+            agentArgs={agentArgs}
+            commandTemplate={commandTemplate}
+            savedCommandInputTemplate={savedCommandInputTemplate}
+            saveLaunchRecipe={saveLaunchRecipe}
+            saveTargetValue={saveTargetValue}
+            saveTargets={saveTargets}
+            settings={settings}
+            repo={repo}
+            canSaveAgentDefault={Boolean(onSaveAgentDefault)}
+            deliveryPlan={deliveryPlan}
+            canStart={canStart}
+            isStarting={isStarting}
+            startLabel={startLabel}
+            onSelectedAgentChange={onSelectedAgentChange}
+            onAgentArgsChange={onAgentArgsChange}
+            onCommandTemplateChange={onCommandTemplateChange}
+            onSaveLaunchRecipeChange={onSaveLaunchRecipeChange}
+            onSaveAgentDefaultChange={onSaveAgentDefaultChange}
+            onOpenSettings={onOpenSettings}
+            onCancel={() => handleOpenChange(false)}
+            onStart={() => void handleStart()}
+          />
+        </DialogContent>
+      ) : null}
     </Dialog>
   )
 }

@@ -7,14 +7,16 @@ const {
   accessSyncMock,
   mkdirSyncMock,
   writeFileSyncMock,
-  spawnMock
+  spawnMock,
+  resolveAgentForegroundProcessMock
 } = vi.hoisted(() => ({
   existsSyncMock: vi.fn(),
   statSyncMock: vi.fn(),
   accessSyncMock: vi.fn(),
   mkdirSyncMock: vi.fn(),
   writeFileSyncMock: vi.fn(),
-  spawnMock: vi.fn()
+  spawnMock: vi.fn(),
+  resolveAgentForegroundProcessMock: vi.fn()
 }))
 
 vi.mock('fs', () => ({
@@ -35,6 +37,10 @@ vi.mock('electron', () => ({
 
 vi.mock('node-pty', () => ({
   spawn: spawnMock
+}))
+
+vi.mock('./agent-foreground-process', () => ({
+  resolveAgentForegroundProcess: resolveAgentForegroundProcessMock
 }))
 
 vi.mock('../wsl', () => ({
@@ -82,6 +88,10 @@ describe('LocalPtyProvider', () => {
     accessSyncMock.mockReturnValue(undefined)
     mkdirSyncMock.mockReset()
     writeFileSyncMock.mockReset()
+    resolveAgentForegroundProcessMock.mockReset()
+    resolveAgentForegroundProcessMock.mockImplementation(
+      async (_pid: number, fallbackProcess: string | null) => fallbackProcess
+    )
 
     exitCb = undefined
     mockProc = {
@@ -345,10 +355,11 @@ describe('LocalPtyProvider', () => {
         '-d',
         'Debian',
         '--',
-        'bash',
+        'sh',
         '-c',
-        'cd \'/mnt/c/Users/jin/repo\' && export PATH="$HOME/.local/bin:$PATH" && exec bash -l'
+        expect.stringContaining("cd '/mnt/c/Users/jin/repo'")
       ])
+      expect(spawnCall[1][5]).toContain('exec "\\$_orca_wsl_shell" -l')
     })
 
     it('marks Orca terminal handle for WSL import when buildSpawnEnv opts in', async () => {
@@ -517,14 +528,7 @@ describe('LocalPtyProvider', () => {
 
       expect(spawnMock).toHaveBeenCalledWith(
         'wsl.exe',
-        [
-          '-d',
-          'Ubuntu',
-          '--',
-          'bash',
-          '-c',
-          'cd \'/home/jin/repo/subdir\' && export PATH="$HOME/.local/bin:$PATH" && exec bash -l'
-        ],
+        ['-d', 'Ubuntu', '--', 'sh', '-c', expect.stringContaining("cd '/home/jin/repo/subdir'")],
         expect.objectContaining({ cwd: expect.any(String) })
       )
     })
@@ -654,6 +658,24 @@ describe('LocalPtyProvider', () => {
     it('returns the process name', async () => {
       const { id } = await provider.spawn({ cols: 80, rows: 24 })
       expect(await provider.getForegroundProcess(id)).toBe('zsh')
+    })
+
+    it('uses the spawned Windows shell when node-pty reports only the terminal name', async () => {
+      Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+      mockProc.process = 'xterm-256color'
+
+      const { id } = await provider.spawn({
+        cols: 80,
+        rows: 24,
+        shellOverride: 'powershell.exe'
+      })
+
+      expect(await provider.getForegroundProcess(id)).toBe('powershell.exe')
+      expect(resolveAgentForegroundProcessMock).toHaveBeenCalledWith(
+        mockProc.pid,
+        'powershell.exe',
+        expect.any(Object)
+      )
     })
 
     it('returns null for unknown PTY ids', async () => {

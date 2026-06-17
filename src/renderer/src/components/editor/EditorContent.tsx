@@ -28,6 +28,7 @@ import { useMarkdownDocuments } from './useMarkdownDocuments'
 import { findGitConflictBlocks } from './monaco-conflict-decorations'
 import { getDiffContentSignature } from './diff-content-signature'
 import { translate } from '@/i18n/i18n'
+import { CheckRunDetailsPanel } from './CheckRunDetailsPanel'
 
 const MonacoEditor = lazy(() => import('./MonacoEditor'))
 const DiffViewer = lazy(() => import('./DiffViewer'))
@@ -167,6 +168,7 @@ export function EditorContent({
   const closeFile = useAppStore((s) => s.closeFile)
   const setRightSidebarTab = useAppStore((s) => s.setRightSidebarTab)
   const setPendingEditorReveal = useAppStore((s) => s.setPendingEditorReveal)
+  const reloadOpenCheckRunDetailsTab = useAppStore((s) => s.reloadOpenCheckRunDetailsTab)
   const [conflictNavigationIndexByFile, setConflictNavigationIndexByFile] = React.useState<
     Record<string, number>
   >({})
@@ -614,6 +616,35 @@ export function EditorContent({
     )
   }
 
+  if (activeFile.mode === 'check-details') {
+    const checkRunDetails = activeFile.checkRunDetails
+    if (!checkRunDetails) {
+      return (
+        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+          {translate(
+            'auto.components.editor.EditorContent.6c4f1a8d2e',
+            'Check details are unavailable.'
+          )}
+        </div>
+      )
+    }
+    const details = checkRunDetails.details
+    const openUrl = details?.detailsUrl ?? details?.url ?? checkRunDetails.check.url
+    return (
+      <CheckRunDetailsPanel
+        check={checkRunDetails.check}
+        details={checkRunDetails.details}
+        loading={checkRunDetails.loading}
+        error={checkRunDetails.error}
+        openUrl={openUrl}
+        worktreeId={activeFile.worktreeId}
+        onRefresh={() => {
+          void reloadOpenCheckRunDetailsTab(activeFile.id)
+        }}
+      />
+    )
+  }
+
   if (activeFile.mode === 'conflict-review') {
     return (
       <ConflictReviewPanel
@@ -839,8 +870,14 @@ export function EditorContent({
       </div>
     )
   }
-  const modifiedDiffContent = editBuffers[activeFile.id] ?? dc.modifiedContent
-  if (isMarkdown && mdViewMode === 'preview') {
+  const modifiedDiffBuffer = editBuffers[activeFile.id]
+  const modifiedDiffContent = modifiedDiffBuffer ?? dc.modifiedContent
+  const largeDiffSaveContentAvailable = !(
+    dc.largeDiffRenderLimit?.limited === true &&
+    modifiedDiffBuffer === undefined &&
+    dc.modifiedContent.length === 0
+  )
+  if (isMarkdown && mdViewMode === 'preview' && dc.largeDiffRenderLimit?.limited !== true) {
     return (
       <div className="flex h-full min-h-0 flex-col">
         <div className="border-b border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
@@ -885,6 +922,8 @@ export function EditorContent({
       modifiedModelKey={modifiedModelKey}
       originalContent={dc.originalContent}
       modifiedContent={modifiedDiffContent}
+      largeDiffRenderLimit={dc.largeDiffRenderLimit}
+      largeDiffSaveContentAvailable={largeDiffSaveContentAvailable}
       language={monacoLanguage}
       filePath={activeFile.filePath}
       relativePath={activeFile.relativePath}

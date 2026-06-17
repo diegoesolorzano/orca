@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo } from 'react'
-import { ArrowUpRight, Check } from 'lucide-react'
+import { Check } from 'lucide-react'
 import type {
   FeatureWallSetupStep,
   FeatureWallSetupStepId
@@ -15,17 +15,19 @@ import {
   TwoAgentsAction,
   WorkspacesAction
 } from './FeatureWallSetupWorkflowActions'
+import { ConnectIntegrationsList } from './ConnectIntegrationsList'
+import { BrowserAction } from './FeatureWallBrowserAction'
 import {
+  SetupBrowserVisual,
   SetupMultipleReposVisual,
   SetupTwoAgentsVisual,
   SetupWorkspacesVisual
 } from './FeatureWallSetupStepVisuals'
-import { Button } from '@/components/ui/button'
-import { GitHubRow, LinearRow } from '../onboarding/IntegrationsStep'
 import { AgentStep } from '../onboarding/AgentStep'
 import { NotificationStep } from '../onboarding/NotificationStep'
 import { useAppStore } from '@/store'
 import type { TuiAgent } from '../../../../shared/types'
+import { getProviderRuntimeContextKey } from '@/lib/provider-runtime-context'
 import { translate } from '@/i18n/i18n'
 
 type FeatureWallSetupChecklistLayout = 'modal' | 'embedded'
@@ -151,6 +153,9 @@ function SelectedStepAction(props: FeatureWallSetupChecklistProps): React.JSX.El
   if (activeStep.id === 'two-worktrees') {
     return <WorkspacesAction done={activeDone} />
   }
+  if (activeStep.id === 'browser') {
+    return <BrowserAction done={activeDone} />
+  }
   if (activeStep.id === 'task-sources') {
     return <TaskSourcesAction />
   }
@@ -177,6 +182,9 @@ function SelectedStepVisual(props: { stepId: FeatureWallSetupStepId }): React.JS
   }
   if (props.stepId === 'add-two-repos') {
     return <SetupMultipleReposVisual />
+  }
+  if (props.stepId === 'browser') {
+    return <SetupBrowserVisual />
   }
   return null
 }
@@ -226,31 +234,26 @@ function NotificationAction(): React.JSX.Element {
 }
 
 function TaskSourcesAction(): React.JSX.Element {
-  const closeModal = useAppStore((s) => s.closeModal)
-  const openTaskPage = useAppStore((s) => s.openTaskPage)
+  const refreshPreflightStatus = useAppStore((s) => s.refreshPreflightStatus)
+  const checkJiraConnection = useAppStore((s) => s.checkJiraConnection)
+  const checkLinearConnection = useAppStore((s) => s.checkLinearConnection)
+  const settings = useAppStore((s) => s.settings)
+  const providerRuntimeContextKey = getProviderRuntimeContextKey(settings)
+
+  useEffect(() => {
+    void refreshPreflightStatus()
+    void checkJiraConnection()
+    void checkLinearConnection()
+  }, [
+    refreshPreflightStatus,
+    checkJiraConnection,
+    checkLinearConnection,
+    providerRuntimeContextKey
+  ])
+
   return (
     <div className="space-y-5">
-      <div className="grid gap-3 xl:grid-cols-2">
-        <GitHubRow compact />
-        <LinearRow compact />
-      </div>
-      <div className="flex items-center pt-2">
-        <Button
-          type="button"
-          size="sm"
-          className="w-fit gap-2"
-          onClick={() => {
-            closeModal()
-            openTaskPage()
-          }}
-        >
-          <ArrowUpRight className="size-3.5" />
-          {translate(
-            'auto.components.feature.wall.FeatureWallSetupChecklist.b1f1981c5e',
-            'See tasks'
-          )}
-        </Button>
-      </div>
+      <ConnectIntegrationsList />
     </div>
   )
 }
@@ -266,9 +269,10 @@ export function FeatureWallSetupChecklist(
   const hasStepVisual =
     activeStep?.id === 'split-terminal' ||
     activeStep?.id === 'two-worktrees' ||
+    activeStep?.id === 'browser' ||
     activeStep?.id === 'add-two-repos'
-  const parallelWorkSteps = getFeatureWallSetupStepsForSection('parallel-work')
   const setupSteps = getFeatureWallSetupStepsForSection('setup')
+  const parallelWorkSteps = getFeatureWallSetupStepsForSection('parallel-work')
   const visualBreakpoint = isEmbedded ? 'xl' : 'sm'
   const visualGridClass =
     visualBreakpoint === 'xl'
@@ -292,10 +296,10 @@ export function FeatureWallSetupChecklist(
       >
         <SetupSection
           title={translate(
-            'auto.components.feature.wall.FeatureWallSetupChecklist.713cc529a5',
-            'Milestones'
+            'auto.components.feature.wall.FeatureWallSetupChecklist.1a6a7d6c80',
+            'Setup'
           )}
-          steps={parallelWorkSteps}
+          steps={setupSteps}
           startOrdinal={1}
           activeStepId={activeStep?.id ?? null}
           progress={progress}
@@ -304,11 +308,11 @@ export function FeatureWallSetupChecklist(
         />
         <SetupSection
           title={translate(
-            'auto.components.feature.wall.FeatureWallSetupChecklist.1a6a7d6c80',
-            'Setup'
+            'auto.components.feature.wall.FeatureWallSetupChecklist.713cc529a5',
+            'Milestones'
           )}
-          steps={setupSteps}
-          startOrdinal={parallelWorkSteps.length + 1}
+          steps={parallelWorkSteps}
+          startOrdinal={setupSteps.length + 1}
           activeStepId={activeStep?.id ?? null}
           progress={progress}
           onSelectStep={onSelectStep}

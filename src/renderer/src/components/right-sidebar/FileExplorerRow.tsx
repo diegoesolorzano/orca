@@ -49,6 +49,7 @@ import { useFileExplorerRowDrag } from './useFileExplorerRowDrag'
 import { isLocalPathOpenBlocked, showLocalPathOpenBlockedToast } from '@/lib/local-path-open-guard'
 import { translate } from '@/i18n/i18n'
 import { extractIpcErrorMessage } from '@/lib/ipc-error'
+import { CLOSE_ALL_CONTEXT_MENUS_EVENT } from '@/components/tab-bar/SortableTab'
 
 const isMac = navigator.userAgent.includes('Mac')
 const isLinux = navigator.userAgent.includes('Linux')
@@ -269,6 +270,7 @@ type FileExplorerRowProps = {
   isIgnored: boolean
   deleteShortcutLabel: string
   connectionId?: string | null
+  canCollapseFolderSubtree: boolean
   targetDir: string
   targetDepth: number
   selectionSize: number
@@ -360,6 +362,7 @@ export function FileExplorerRow({
   isIgnored,
   deleteShortcutLabel,
   connectionId,
+  canCollapseFolderSubtree,
   targetDir,
   targetDepth,
   selectionSize,
@@ -419,7 +422,15 @@ export function FileExplorerRow({
   }, [connectionId, node])
 
   return (
-    <ContextMenu>
+    <ContextMenu
+      onOpenChange={(open) => {
+        if (!open) {
+          return
+        }
+        window.dispatchEvent(new Event(CLOSE_ALL_CONTEXT_MENUS_EVENT))
+        onContextMenuSelect()
+      }}
+    >
       <ContextMenuTrigger asChild>
         <button
           className={cn(
@@ -494,7 +505,6 @@ export function FileExplorerRow({
           onDrop={handleDrop}
           onClick={(e) => onClick(e)}
           onDoubleClick={onDoubleClick}
-          onContextMenu={onContextMenuSelect}
         >
           {node.isDirectory ? (
             <>
@@ -651,7 +661,7 @@ export function FileExplorerRow({
             {translate('auto.components.right.sidebar.FileExplorerRow.c2112579f6', 'Download')}
           </ContextMenuItem>
         )}
-        {shouldShowCollapseFolderAction(node, isExpanded) && (
+        {canCollapseFolderSubtree && shouldShowCollapseFolderAction(node, isExpanded) && (
           <ContextMenuItem onSelect={onCollapseFolderSubtree}>
             <ListCollapse />
             {translate(

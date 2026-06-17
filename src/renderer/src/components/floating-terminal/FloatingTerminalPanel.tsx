@@ -16,6 +16,7 @@ import { FileText, Globe, Minus, TerminalSquare } from 'lucide-react'
 import { toast } from 'sonner'
 import BrowserPane from '@/components/browser-pane/BrowserPane'
 import { ShortcutKeyCombo } from '@/components/ShortcutKeyCombo'
+import { useContextualTour } from '@/components/contextual-tours/use-contextual-tour'
 import TabBar from '@/components/tab-bar/TabBar'
 import { resolveGroupTabFromVisibleId } from '@/components/tab-group/tab-group-visible-id'
 import TerminalPane from '@/components/terminal-pane/TerminalPane'
@@ -106,6 +107,13 @@ const EditorPanel = lazy(() => import('@/components/editor/EditorPanel'))
 type FloatingTerminalPanelProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
+  tourInteractionSnapshot?: FloatingWorkspaceTourInteractionSnapshot | null | undefined
+}
+
+type FloatingWorkspaceTourInteractionSnapshot = {
+  wasPreviouslyInteracted?: boolean
+  persisted?: Promise<void>
+  recordFeatureInteractionForTour: boolean
 }
 
 const FLOATING_TERMINAL_NO_DRAG_SELECTOR =
@@ -148,9 +156,20 @@ function areFloatingTerminalPanelCommittedBoundsEqual(
   return left !== null && JSON.stringify(left) === JSON.stringify(right)
 }
 
+function setFloatingTerminalInputFocusedInMain(focused: boolean): void {
+  const setInputFocused = window.api.ui.setFloatingTerminalInputFocused
+  // Why: dev reloads can pair a new renderer with an older preload; losing this
+  // shortcut mirror should not take down the whole React tree.
+  if (typeof setInputFocused !== 'function') {
+    return
+  }
+  setInputFocused(focused)
+}
+
 export function FloatingTerminalPanel({
   open,
-  onOpenChange
+  onOpenChange,
+  tourInteractionSnapshot
 }: FloatingTerminalPanelProps): React.JSX.Element | null {
   const tabsByWorktree = useAppStore((s) => s.tabsByWorktree)
   const browserTabsByWorktree = useAppStore((s) => s.browserTabsByWorktree)
@@ -342,6 +361,13 @@ export function FloatingTerminalPanel({
       : activeTab?.contentType === 'terminal'
         ? 'terminal'
         : 'editor'
+
+  useContextualTour('floating-workspace', open, 'floating_workspace_visible', {
+    recordFeatureInteraction: tourInteractionSnapshot?.recordFeatureInteractionForTour ?? false,
+    featureInteractionPersisted: tourInteractionSnapshot?.persisted,
+    wasFeaturePreviouslyInteracted: tourInteractionSnapshot?.wasPreviouslyInteracted
+  })
+
   const {
     saveDialogFileId,
     saveDialogFile,
@@ -897,7 +923,7 @@ export function FloatingTerminalPanel({
   }, [cancelShortcutFocusFrame, focusPanelForShortcuts])
 
   const setFloatingTerminalInputFocused = useCallback((target: EventTarget | null): void => {
-    window.api.ui.setFloatingTerminalInputFocused(isFloatingWorkspaceTerminalInputTarget(target))
+    setFloatingTerminalInputFocusedInMain(isFloatingWorkspaceTerminalInputTarget(target))
   }, [])
 
   const handleShortcutSurfaceKeyDown = useCallback(
@@ -1103,9 +1129,9 @@ export function FloatingTerminalPanel({
 
   useEffect(() => {
     if (!open) {
-      window.api.ui.setFloatingTerminalInputFocused(false)
+      setFloatingTerminalInputFocusedInMain(false)
     }
-    return () => window.api.ui.setFloatingTerminalInputFocused(false)
+    return () => setFloatingTerminalInputFocusedInMain(false)
   }, [open])
 
   useEffect(() => {
@@ -1118,7 +1144,7 @@ export function FloatingTerminalPanel({
       if (!panel || !(event.target instanceof Node) || panel.contains(event.target)) {
         return
       }
-      window.api.ui.setFloatingTerminalInputFocused(false)
+      setFloatingTerminalInputFocusedInMain(false)
       const active = document.activeElement
       if (active instanceof HTMLElement && panel.contains(active)) {
         // Why: regular tab strip items are non-focusable, so clicking them can
@@ -1134,7 +1160,7 @@ export function FloatingTerminalPanel({
       }
       // Why: browser webviews focus out-of-process and do not emit renderer
       // pointerdown events, so release floating ownership on renderer blur too.
-      window.api.ui.setFloatingTerminalInputFocused(false)
+      setFloatingTerminalInputFocusedInMain(false)
       active.blur()
     }
 
@@ -1349,7 +1375,12 @@ export function FloatingTerminalPanel({
           />
         </div>
 
-        <div className="relative min-h-0 flex-1 overflow-hidden bg-background">
+        <div
+          className="relative min-h-0 flex-1 overflow-hidden bg-background"
+          data-contextual-tour-target={
+            hasVisibleFloatingTabs ? 'floating-workspace-surface' : undefined
+          }
+        >
           {cwd
             ? tabs.map((tab) => {
                 const isActive = tab.id === activeTerminalId
@@ -1364,7 +1395,13 @@ export function FloatingTerminalPanel({
                       worktreeId={FLOATING_TERMINAL_WORKTREE_ID}
                       cwd={cwd}
                       isActive={isActive}
-                      isVisible={isActive}
+                      // Why: the closed panel is only CSS-hidden, so gate
+                      // visibility on `open` too. This routes the floating
+                      // terminal through the standard hidden-terminal
+                      // suspend/resume path: no live WebGL context (or glyph
+                      // atlas to corrupt) while hidden, and the resume on
+                      // reopen rebuilds the renderer from scratch.
+                      isVisible={isActive && open}
                       onPtyExit={() => closeTab(tab.id)}
                       onCloseTab={() => closeFloatingItem(tab.id)}
                     />
@@ -1586,6 +1623,7 @@ function FloatingTerminalEmptyState({
           type="button"
           variant="ghost"
           className="grid h-8 w-full grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2.5 rounded-md px-3 py-0 text-sm font-normal text-foreground hover:bg-muted/40 hover:text-foreground"
+          data-contextual-tour-target="floating-workspace-new-terminal"
           onClick={onNewTerminal}
         >
           <TerminalSquare className="size-3.5 opacity-90" />
@@ -1601,6 +1639,7 @@ function FloatingTerminalEmptyState({
           type="button"
           variant="ghost"
           className="grid h-8 w-full grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2.5 rounded-md px-3 py-0 text-sm font-normal text-foreground hover:bg-muted/40 hover:text-foreground"
+          data-contextual-tour-target="floating-workspace-new-markdown"
           onClick={onNewMarkdown}
         >
           <FileText className="size-3.5 opacity-90" />

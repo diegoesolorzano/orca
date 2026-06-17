@@ -4,6 +4,7 @@ import { useAppStore } from '@/store'
 import { ONBOARDING_FINAL_STEP, ONBOARDING_FLOW_VERSION } from '../../../../shared/constants'
 import type { EventProps } from '../../../../shared/telemetry-events'
 import type { GlobalSettings, OnboardingState, TuiAgent } from '../../../../shared/types'
+import { applyAgentPermissionMode } from '../../../../shared/tui-agent-permissions'
 import type { StepId, StepNumber } from './use-onboarding-flow-types'
 
 export async function persistStep(
@@ -19,6 +20,17 @@ export async function persistStep(
 
 function selectedAgentOrBlank(agent: TuiAgent | null): TuiAgent | 'blank' {
   return agent ?? 'blank'
+}
+
+export function buildCompletedOnboardingNotificationSettings(
+  notifications: GlobalSettings['notifications']
+): GlobalSettings['notifications'] {
+  return {
+    ...notifications,
+    enabled: true,
+    agentTaskComplete: true,
+    terminalBell: true
+  }
 }
 
 type CloseWithDeps = {
@@ -91,9 +103,11 @@ export function useCloseWith({
       onOnboardingChange(nextState)
       if (outcome === 'completed' && completedPath) {
         const total = Math.max(0, Date.now() - startTimeRef.current)
+        // Why: no `is_git_repo` — project selection now happens in the Add
+        // Project modal after this fires, so the signal moved to
+        // `repo_added.is_git_repo`. See docs/reference/telemetry-availability.md.
         track('onboarding_completed', {
           path: completedPath,
-          is_git_repo: checklist.addedRepo === true,
           total_duration_ms: total
         })
         // Why: checklist items completed by the wizard itself must fire
@@ -124,6 +138,7 @@ export function useCloseWith({
 type PersistCurrentStepDeps = {
   currentStepId: StepId
   selectedAgent: TuiAgent | null
+  yoloPermissions: boolean
   theme: GlobalSettings['theme']
   settings: GlobalSettings | null
   updateSettings: (updates: Partial<GlobalSettings>) => Promise<void> | void
@@ -139,6 +154,7 @@ export type PersistCurrentStepResult = {
 export function usePersistCurrentStep({
   currentStepId,
   selectedAgent,
+  yoloPermissions,
   theme,
   settings,
   updateSettings,
@@ -153,7 +169,14 @@ export function usePersistCurrentStep({
     try {
       if (currentStepId === 'agent') {
         const defaultTuiAgent = selectedAgentOrBlank(selectedAgent)
-        await updateSettings({ defaultTuiAgent })
+        await updateSettings({
+          defaultTuiAgent,
+          ...applyAgentPermissionMode({
+            mode: yoloPermissions ? 'yolo' : 'manual',
+            agentDefaultArgs: settings.agentDefaultArgs,
+            agentDefaultEnv: settings.agentDefaultEnv
+          })
+        })
         const choseAgent = defaultTuiAgent !== 'blank'
         const wasAlreadyChosen = onboardingChecklist.choseAgent
         onOnboardingChange(
@@ -176,14 +199,15 @@ export function usePersistCurrentStep({
       }
       if (currentStepId === 'notifications') {
         await updateSettings({
-          notifications: {
-            ...settings.notifications,
-            enabled: true,
-            agentTaskComplete: true,
-            terminalBell: true
-          }
+          notifications: buildCompletedOnboardingNotificationSettings(settings.notifications)
         })
         useAppStore.getState().recordFeatureInteraction('notifications')
+        onOnboardingChange(await persistStep(ONBOARDING_FINAL_STEP))
+        return { ok: true }
+      }
+      if (currentStepId === 'windows_terminal') {
+        // Why: the Windows terminal controls persist on selection. Continuing
+        // only marks the preference page complete for resume/telemetry state.
         onOnboardingChange(await persistStep(4))
         return { ok: true }
       }
@@ -208,6 +232,7 @@ export function usePersistCurrentStep({
     settings,
     theme,
     updateSettings,
+    yoloPermissions,
     setError
   ])
 }

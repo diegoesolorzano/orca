@@ -129,6 +129,7 @@ describe('client UI RPC methods', () => {
       ...getDefaultUIState(),
       rightSidebarOpen: false,
       rightSidebarTab: 'checks',
+      rightSidebarExplorerView: 'search',
       showActiveOnly: true,
       filterRepoIds: ['repo-1']
     }
@@ -142,6 +143,7 @@ describe('client UI RPC methods', () => {
       makeRequest('ui.set', {
         rightSidebarOpen: false,
         rightSidebarTab: 'checks',
+        rightSidebarExplorerView: 'search',
         showActiveOnly: true,
         hideSleepingWorkspaces: true,
         filterRepoIds: ['repo-1']
@@ -151,6 +153,7 @@ describe('client UI RPC methods', () => {
     expect(runtime.updateUIState).toHaveBeenCalledWith({
       rightSidebarOpen: false,
       rightSidebarTab: 'checks',
+      rightSidebarExplorerView: 'search',
       showActiveOnly: true,
       hideSleepingWorkspaces: true,
       filterRepoIds: ['repo-1']
@@ -261,6 +264,48 @@ describe('client UI RPC methods', () => {
     )
 
     expect(response).toMatchObject({ ok: false, error: { code: 'invalid_argument' } })
+    expect(runtime.updateUIState).not.toHaveBeenCalled()
+  })
+
+  it('rejects star-nag persisted state mutations from remote clients', async () => {
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      updateUIState: vi.fn()
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: CLIENT_UI_METHODS })
+
+    const response = await dispatcher.dispatch(
+      makeRequest('ui.set', {
+        starNagBaselineAgents: 10,
+        starNagAppVersion: '1.2.3',
+        starNagNextThreshold: 70,
+        starNagCompleted: true,
+        starNagDeferredUntil: null
+      })
+    )
+
+    expect(response).toMatchObject({ ok: false, error: { code: 'invalid_argument' } })
+    expect(runtime.updateUIState).not.toHaveBeenCalled()
+  })
+
+  it('rejects each star-nag persisted state mutation field from remote clients', async () => {
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      updateUIState: vi.fn()
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: CLIENT_UI_METHODS })
+    const forbiddenPayloads = [
+      { starNagBaselineAgents: 10 },
+      { starNagAppVersion: '1.2.3' },
+      { starNagNextThreshold: 70 },
+      { starNagCompleted: true },
+      { starNagDeferredUntil: null }
+    ]
+
+    for (const payload of forbiddenPayloads) {
+      const response = await dispatcher.dispatch(makeRequest('ui.set', payload))
+      expect(response).toMatchObject({ ok: false, error: { code: 'invalid_argument' } })
+    }
     expect(runtime.updateUIState).not.toHaveBeenCalled()
   })
 

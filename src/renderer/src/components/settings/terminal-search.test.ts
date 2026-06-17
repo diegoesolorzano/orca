@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { getTerminalPaneSearchEntries } from './terminal-search'
 import { getAppearancePaneSearchEntries, getSidebarEntries } from './appearance-search'
+import { getWorkspaceCardLayoutEntry } from './appearance-sidebar-search'
+import { matchesSettingsSearch } from './settings-search'
 
 describe('getTerminalPaneSearchEntries', () => {
   it('includes the Windows right-click setting on Windows', () => {
@@ -67,6 +69,24 @@ describe('getTerminalPaneSearchEntries', () => {
     ).toBe(true)
   })
 
+  it('includes the running-terminal close confirmation setting on all platforms', () => {
+    const entriesWindows = getTerminalPaneSearchEntries({ isWindows: true, isMac: false })
+    const entriesMac = getTerminalPaneSearchEntries({ isWindows: false, isMac: true })
+    const entriesLinux = getTerminalPaneSearchEntries({ isWindows: false, isMac: false })
+    const hasEntry = (entries: typeof entriesWindows): boolean =>
+      entries.some(
+        (entry) =>
+          entry.title === 'Ask Before Closing Running Terminals' &&
+          matchesSettingsSearch('confirm', [entry]) &&
+          matchesSettingsSearch('agent', [entry]) &&
+          matchesSettingsSearch('close', [entry])
+      )
+
+    expect(hasEntry(entriesWindows)).toBe(true)
+    expect(hasEntry(entriesMac)).toBe(true)
+    expect(hasEntry(entriesLinux)).toBe(true)
+  })
+
   it('keeps terminal appearance settings in the Appearance search index', () => {
     const entriesWindows = getTerminalPaneSearchEntries({ isWindows: true, isMac: false })
     const entriesMac = getTerminalPaneSearchEntries({ isWindows: false, isMac: true })
@@ -84,6 +104,15 @@ describe('getTerminalPaneSearchEntries', () => {
     )
   })
 
+  it('omits the Warp import appearance entry when desktop-only controls are hidden', () => {
+    const desktopEntries = getAppearancePaneSearchEntries({ showWarpImport: true })
+    const webEntries = getAppearancePaneSearchEntries({ showWarpImport: false })
+
+    expect(desktopEntries.some((entry) => entry.title === 'Import themes from Warp')).toBe(true)
+    expect(webEntries.some((entry) => entry.title === 'Import themes from Warp')).toBe(false)
+    expect(webEntries.some((entry) => entry.title === 'Import from Ghostty')).toBe(true)
+  })
+
   it('keeps sidebar shortcut restore settings in the Appearance search index', () => {
     const automationsEntry = getSidebarEntries().find(
       (entry) => entry.title === 'Show Automations Button'
@@ -96,5 +125,23 @@ describe('getTerminalPaneSearchEntries', () => {
     expect(
       getAppearancePaneSearchEntries().some((entry) => entry.title === 'Show Automations Button')
     ).toBe(true)
+  })
+
+  it('includes workspace card layout guidance in the sidebar and Appearance catalogs', () => {
+    const entry = getWorkspaceCardLayoutEntry()
+
+    expect(getSidebarEntries()).toContainEqual(entry)
+    expect(getAppearancePaneSearchEntries()).toContainEqual(entry)
+  })
+
+  it.each(['compact', 'compact display', 'workspace cards', 'sidebar', 'card layout'])(
+    'matches workspace card layout search for %s',
+    (query) => {
+      expect(matchesSettingsSearch(query, getWorkspaceCardLayoutEntry())).toBe(true)
+    }
+  )
+
+  it('matches the Appearance catalog for compact workspace card searches', () => {
+    expect(matchesSettingsSearch('compact', getAppearancePaneSearchEntries())).toBe(true)
   })
 })

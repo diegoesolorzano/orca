@@ -12,6 +12,7 @@ import {
   getFirstIncompleteFeatureWallSetupStepId,
   type FeatureWallSetupStepId
 } from '../../../../shared/feature-wall-setup-steps'
+import type { FeatureWallSetupProgress } from '../feature-wall/feature-wall-setup-progress'
 import { SetupGuideProgressRing } from '../setup-guide/SetupGuideProgressRing'
 import { useSetupGuideProgress } from '../setup-guide/use-setup-guide-progress'
 import { translate } from '@/i18n/i18n'
@@ -33,6 +34,10 @@ export function getSetupGuideSidebarEntryReady(
   return persistedUIReady && setupProgressReady
 }
 
+function isSetupGuideSidebarComplete(progress: FeatureWallSetupProgress): boolean {
+  return progress.coreDoneCount >= progress.coreTotal
+}
+
 export function SetupGuideSidebarEntry(): React.JSX.Element | null {
   const openModal = useAppStore((s) => s.openModal)
   const activeModal = useAppStore((s) => s.activeModal)
@@ -42,24 +47,33 @@ export function SetupGuideSidebarEntry(): React.JSX.Element | null {
   // Why: the sidebar count must be warmed before click so it matches the modal
   // count instead of changing while the lazy modal is mounting.
   const setupProgress = useSetupGuideProgress(true, false, false)
-  const setupComplete = setupProgress.coreDoneCount >= setupProgress.coreTotal
+  const setupComplete = isSetupGuideSidebarComplete(setupProgress)
   const setupActive = activeModal === 'setup-guide'
-  const firstUnfinishedSetupStepId = React.useMemo<FeatureWallSetupStepId>(
-    () => getFirstIncompleteFeatureWallSetupStepId(setupProgress.stepDone),
-    [setupProgress.stepDone]
-  )
   const showSetupGuideEntry = shouldShowSetupGuideEntry({
     ready: getSetupGuideSidebarEntryReady(persistedUIReady, setupProgress.ready),
     setupComplete,
     dismissed: setupGuideSidebarDismissed
   })
+  const lastVisibleProgressRef = React.useRef<FeatureWallSetupProgress | null>(null)
+  if (showSetupGuideEntry) {
+    lastVisibleProgressRef.current = setupProgress
+  }
+  // Why: host/workspace switches can briefly refresh setup probes. Once the
+  // checklist is visibly available, keep that stable row through the refresh.
+  const renderedProgress = showSetupGuideEntry
+    ? setupProgress
+    : !setupProgress.ready && !setupGuideSidebarDismissed
+      ? lastVisibleProgressRef.current
+      : null
   const handleHideSetupGuide = React.useCallback(() => {
     setSetupGuideSidebarDismissed(true)
   }, [setSetupGuideSidebarDismissed])
 
-  if (!showSetupGuideEntry) {
+  if (!renderedProgress) {
     return null
   }
+  const firstUnfinishedSetupStepId: FeatureWallSetupStepId =
+    getFirstIncompleteFeatureWallSetupStepId(renderedProgress.stepDone)
 
   return (
     <ContextMenu>
@@ -82,8 +96,8 @@ export function SetupGuideSidebarEntry(): React.JSX.Element | null {
           )}
         >
           <SetupGuideProgressRing
-            done={setupProgress.coreDoneCount}
-            total={setupProgress.coreTotal}
+            done={renderedProgress.coreDoneCount}
+            total={renderedProgress.coreTotal}
             sizeClassName="size-4"
           />
           <span className="flex min-w-0 flex-1 flex-col">

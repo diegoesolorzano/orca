@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { getDefaultPrimarySelectionMiddleClickPaste, getDefaultSettings } from './constants'
+import {
+  getDefaultNotificationSettings,
+  getDefaultPrimarySelectionMiddleClickPaste,
+  getDefaultSettings
+} from './constants'
 
 describe('getDefaultSettings', () => {
   it('uses platform-consistent separators for the default workspace directory', () => {
@@ -31,6 +35,10 @@ describe('getDefaultSettings', () => {
     expect(getDefaultSettings('/tmp').terminalUseSeparateLightTheme).toBe(true)
   })
 
+  it('asks before closing terminals with running processes by default', () => {
+    expect(getDefaultSettings('/tmp').skipCloseTerminalWithRunningProcessConfirm).toBe(false)
+  })
+
   it('uses system language by default', () => {
     expect(getDefaultSettings('/tmp').uiLanguage).toBe('system')
   })
@@ -55,6 +63,30 @@ describe('getDefaultSettings', () => {
 
   it('keeps compact worktree cards disabled by default', () => {
     expect(getDefaultSettings('/tmp').compactWorktreeCards).toBe(false)
+  })
+
+  it('suppresses notifications for the focused worktree by default for new users', () => {
+    expect(getDefaultNotificationSettings().suppressWhenFocused).toBe(true)
+    expect(getDefaultSettings('/tmp').notifications.suppressWhenFocused).toBe(true)
+  })
+
+  it('defaults agent launch args to yolo mode where the CLI supports it', () => {
+    const settings = getDefaultSettings('/tmp')
+
+    expect(settings.agentDefaultArgs).toMatchObject({
+      claude: '--dangerously-skip-permissions',
+      codex: '--dangerously-bypass-approvals-and-sandbox',
+      gemini: '--yolo',
+      cursor: '--yolo',
+      copilot: '--yolo',
+      grok: '--permission-mode bypassPermissions'
+    })
+    expect(settings.agentDefaultArgs).not.toHaveProperty('opencode')
+    expect(settings.agentDefaultArgs).not.toHaveProperty('kilo')
+    expect(settings.agentDefaultEnv).toMatchObject({
+      goose: { GOOSE_MODE: 'auto' }
+    })
+    expect(settings.agentYoloDefaultsMigrated).toBe(true)
   })
 })
 

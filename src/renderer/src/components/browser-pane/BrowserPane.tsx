@@ -52,6 +52,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Label } from '@/components/ui/label'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { useAppStore } from '@/store'
+import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { ORCA_BROWSER_BLANK_URL, ORCA_BROWSER_PARTITION } from '../../../../shared/constants'
 import type {
   BrowserLoadError,
@@ -119,6 +120,7 @@ import {
   applyBrowserPageZoom,
   browserPageZoomLevelToPercent,
   DEFAULT_BROWSER_PAGE_ZOOM_LEVEL,
+  getBrowserPageZoomIndicatorState,
   normalizeBrowserPageZoomLevel,
   setBrowserPageZoomLevel,
   type BrowserPageZoomDirection
@@ -187,12 +189,16 @@ type BrowserOverlayAnchor = {
 const BROWSER_ANNOTATION_INTENT_OPTIONS = [
   {
     value: 'change',
-    label: translate('auto.components.browser.pane.BrowserPane.143204e423', 'Change'),
+    get label() {
+      return translate('auto.components.browser.pane.BrowserPane.143204e423', 'Change')
+    },
     icon: PencilLine
   },
   {
     value: 'question',
-    label: translate('auto.components.browser.pane.BrowserPane.b5ba6085de', 'Question'),
+    get label() {
+      return translate('auto.components.browser.pane.BrowserPane.b5ba6085de', 'Question')
+    },
     icon: MessageCircleQuestionMark
   }
 ] as const
@@ -251,6 +257,16 @@ type RemoteBrowserContextMenu = {
 type RemoteBrowserViewportSize = {
   width: number
   height: number
+}
+
+function getBrowserPageRuntimeEnvironmentId(
+  page: BrowserPageState,
+  inferredRuntimeEnvironmentId: string | null | undefined
+): string | null {
+  if (page.browserRuntimeEnvironmentId !== undefined) {
+    return page.browserRuntimeEnvironmentId?.trim() || null
+  }
+  return inferredRuntimeEnvironmentId?.trim() || null
 }
 
 type RemoteBrowserImagePoint = {
@@ -730,8 +746,8 @@ export default function BrowserPane({
   browserTab: BrowserWorkspaceState
   isActive: boolean
 }): React.JSX.Element {
-  const activeRuntimeEnvironmentId = useAppStore(
-    (s) => s.settings?.activeRuntimeEnvironmentId ?? null
+  const activeRuntimeEnvironmentId = useAppStore((s) =>
+    getRuntimeEnvironmentIdForWorktree(s, browserTab.worktreeId)
   )
   const browserPages = useAppStore((s) =>
     getBrowserPagesForWorkspace(s.browserPagesByWorkspace, browserTab.id)
@@ -740,14 +756,19 @@ export default function BrowserPane({
     browserPages.find((page) => page.id === browserTab.activePageId) ?? browserPages[0] ?? null
   const updateBrowserPageState = useAppStore((s) => s.updateBrowserPageState)
   const setBrowserPageUrl = useAppStore((s) => s.setBrowserPageUrl)
-  const runtimeEnvironmentActive = Boolean(activeRuntimeEnvironmentId?.trim())
+  const activeBrowserRuntimeEnvironmentId = activeBrowserPage
+    ? getBrowserPageRuntimeEnvironmentId(activeBrowserPage, activeRuntimeEnvironmentId)
+    : null
+  const runtimeEnvironmentActive = Boolean(activeBrowserRuntimeEnvironmentId)
   const activeBrowserPageId = activeBrowserPage?.id ?? null
   const browserPageIds = useMemo(() => browserPages.map((page) => page.id), [browserPages])
   const automationVisiblePageIds = useBrowserAutomationVisiblePageIds(browserPageIds)
   // Why: inactive Electron webviews must stay mounted in their original DOM
   // parent. Parking them by unmounting/reparenting loses form text and SPA
   // state on normal tab switches.
-  const renderedBrowserPages = browserPages
+  const renderedBrowserPages = browserPages.filter(
+    (page) => !getBrowserPageRuntimeEnvironmentId(page, activeRuntimeEnvironmentId)
+  )
   const [activeBrowserDriver, setActiveBrowserDriver] = useState<BrowserDriverState>({
     kind: 'idle'
   })
@@ -757,9 +778,11 @@ export default function BrowserPane({
       return
     }
     for (const page of browserPages) {
-      destroyPersistentWebview(page.id)
+      if (getBrowserPageRuntimeEnvironmentId(page, activeRuntimeEnvironmentId)) {
+        destroyPersistentWebview(page.id)
+      }
     }
-  }, [browserPages, runtimeEnvironmentActive])
+  }, [activeRuntimeEnvironmentId, browserPages, runtimeEnvironmentActive])
 
   useEffect(() => {
     if (runtimeEnvironmentActive || !activeBrowserPageId) {
@@ -787,11 +810,12 @@ export default function BrowserPane({
     await window.api.runtime.reclaimBrowserForDesktop(activeBrowserPageId)
   }, [activeBrowserPageId])
 
-  if (runtimeEnvironmentActive) {
+  if (activeBrowserRuntimeEnvironmentId) {
     return activeBrowserPage ? (
       <RemoteBrowserPagePane
-        key={`${activeRuntimeEnvironmentId?.trim() ?? ''}:${activeBrowserPage.id}`}
+        key={`${activeBrowserRuntimeEnvironmentId ?? ''}:${activeBrowserPage.id}`}
         browserTab={activeBrowserPage}
+        runtimeEnvironmentId={activeBrowserRuntimeEnvironmentId}
         worktreeId={browserTab.worktreeId}
         isActive={isActive}
         onUpdatePageState={updateBrowserPageState}
@@ -832,18 +856,20 @@ export default function BrowserPane({
 
 function RemoteBrowserPagePane({
   browserTab,
+  runtimeEnvironmentId,
   worktreeId,
   isActive,
   onUpdatePageState,
   onSetUrl
 }: {
   browserTab: BrowserPageState
+  runtimeEnvironmentId: string
   worktreeId: string
   isActive: boolean
   onUpdatePageState: (tabId: string, updates: BrowserTabPageState) => void
   onSetUrl: (tabId: string, url: string) => void
 }): React.JSX.Element {
-  const settings = useAppStore((s) => s.settings)
+  const activeRuntimeEnvironmentId = runtimeEnvironmentId
   const addressBarInputRef = useRef<HTMLInputElement | null>(null)
   const imageRef = useRef<HTMLImageElement | null>(null)
   const remoteViewportRef = useRef<HTMLDivElement | null>(null)
@@ -876,7 +902,6 @@ function RemoteBrowserPagePane({
   const currentBrowserTabIdRef = useRef(browserTab.id)
   const currentBrowserTabUrlRef = useRef(browserTab.url)
   const runtimeWorktree = useMemo(() => toRuntimeWorktreeSelector(worktreeId), [worktreeId])
-  const activeRuntimeEnvironmentId = settings?.activeRuntimeEnvironmentId?.trim() ?? null
   const activeRuntimeEnvironmentIdRef = useRef<string | null>(activeRuntimeEnvironmentId)
   const startRemoteStreamRef = useRef<
     (pageId: string) => Promise<RemoteBrowserStreamSubscription | null>
@@ -1244,7 +1269,7 @@ function RemoteBrowserPagePane({
         return
       }
       const state = useAppStore.getState()
-      const currentEnvironmentId = state.settings?.activeRuntimeEnvironmentId?.trim() ?? null
+      const currentEnvironmentId = getRuntimeEnvironmentIdForWorktree(state, worktreeId)
       const pageStillExists = browserPageExists(browserTab.id)
       if (currentEnvironmentId === activeRuntimeEnvironmentId && pageStillExists) {
         return
@@ -1263,7 +1288,7 @@ function RemoteBrowserPagePane({
         { timeoutMs: 15_000, suppressFeatureInteraction: true }
       ).catch(() => {})
     }
-  }, [activeRuntimeEnvironmentId, browserTab.id, runtimeWorktree])
+  }, [activeRuntimeEnvironmentId, browserTab.id, runtimeWorktree, worktreeId])
 
   const applyRemoteTabInfo = useCallback(
     (tab: Pick<BrowserTabInfo, 'url' | 'title'>): void => {
@@ -4172,6 +4197,10 @@ function BrowserPagePane({
     [annotationBannerSendModeId, annotationTraySendModeId, closeAgentSendPopoverTargetMode]
   )
 
+  const handleBrowserAnnotationsSentToAgent = useCallback((): void => {
+    recordFeatureInteraction('browser-annotations-sent-to-agent')
+  }, [recordFeatureInteraction])
+
   const handleClearBrowserAnnotations = useCallback((): void => {
     if (browserAnnotationsRef.current.length === 0) {
       return
@@ -4321,8 +4350,10 @@ function BrowserPagePane({
     }
     return received
   })()
-  const showBrowserZoomIndicator =
-    browserZoomFeedbackVisible || browserZoomPercent !== browserDefaultZoomPercent
+  const browserZoomIndicatorState = getBrowserPageZoomIndicatorState({
+    feedbackVisible: browserZoomFeedbackVisible,
+    isDefaultZoom: browserZoomPercent === browserDefaultZoomPercent
+  })
 
   useEffect(() => {
     const webview = webviewRef.current
@@ -4812,19 +4843,22 @@ function BrowserPagePane({
                       'auto.components.browser.pane.BrowserPane.b733a91bd9',
                       'Add feedback for the selected element.'
                     )
-                  : browserAnnotations.length > 0
+                  : browserAnnotations.length === 1
                     ? translate(
-                        'auto.components.browser.pane.BrowserPane.a3508d7e6e',
-                        '{{value0}} annotation{{value1}} ready. Select another element or copy all feedback.',
-                        {
-                          value0: browserAnnotations.length,
-                          value1: browserAnnotations.length === 1 ? '' : 's'
-                        }
+                        'auto.components.browser.pane.BrowserPane.074f0ed10b',
+                        '{{value0}} annotation ready. Select another element or copy all feedback.',
+                        { value0: browserAnnotations.length }
                       )
-                    : translate(
-                        'auto.components.browser.pane.BrowserPane.777b5bc4ec',
-                        'Click an element to add feedback for the agent.'
-                      )
+                    : browserAnnotations.length > 0
+                      ? translate(
+                          'auto.components.browser.pane.BrowserPane.a2164a6e5a',
+                          '{{value0}} annotations ready. Select another element or copy all feedback.',
+                          { value0: browserAnnotations.length }
+                        )
+                      : translate(
+                          'auto.components.browser.pane.BrowserPane.777b5bc4ec',
+                          'Click an element to add feedback for the agent.'
+                        )
                 : grab.state === 'confirming'
                   ? translate(
                       'auto.components.browser.pane.BrowserPane.e852e20cea',
@@ -4871,6 +4905,7 @@ function BrowserPagePane({
                     prompt={browserAnnotationsPrompt}
                     promptDelivery="submit-after-ready"
                     launchSource="notes_send"
+                    onPromptDelivered={handleBrowserAnnotationsSentToAgent}
                   />
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -4933,14 +4968,10 @@ function BrowserPagePane({
         <div
           role="status"
           aria-live="polite"
-          aria-hidden={!showBrowserZoomIndicator}
+          aria-hidden={browserZoomIndicatorState.ariaHidden}
           className={cn(
             'pointer-events-none absolute top-3 right-3 z-30 rounded-md border border-border bg-popover/95 px-2.5 py-1 text-xs font-medium text-popover-foreground shadow-xs transition-opacity duration-300 ease-out',
-            browserZoomFeedbackVisible
-              ? 'opacity-100'
-              : browserZoomPercent === 100
-                ? 'opacity-0'
-                : 'opacity-80'
+            browserZoomIndicatorState.opacityClassName
           )}
         >
           {browserZoomPercent}%
@@ -5088,9 +5119,17 @@ function BrowserPagePane({
             <div className="flex items-center gap-2 border-b border-border px-3 py-2">
               <MessageSquarePlus className="size-4 text-muted-foreground" />
               <div className="min-w-0 flex-1 text-sm font-medium">
-                {browserAnnotations.length}{' '}
-                {translate('auto.components.browser.pane.BrowserPane.a3508d7e6e', 'annotation')}
-                {browserAnnotations.length === 1 ? '' : 's'}
+                {browserAnnotations.length === 1
+                  ? translate(
+                      'auto.components.browser.pane.BrowserPane.ea6af700da',
+                      '{{value0}} annotation',
+                      { value0: browserAnnotations.length }
+                    )
+                  : translate(
+                      'auto.components.browser.pane.BrowserPane.c13693fe27',
+                      '{{value0}} annotations',
+                      { value0: browserAnnotations.length }
+                    )}
               </div>
               <DropdownMenu
                 modal={false}
@@ -5126,6 +5165,7 @@ function BrowserPagePane({
                     prompt={browserAnnotationsPrompt}
                     promptDelivery="submit-after-ready"
                     launchSource="notes_send"
+                    onPromptDelivered={handleBrowserAnnotationsSentToAgent}
                   />
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -5192,7 +5232,7 @@ function BrowserPagePane({
                   <Button
                     size="icon-xs"
                     variant="ghost"
-                    className="opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 group-focus-within:opacity-100"
+                    className="can-hover:opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 group-focus-within:opacity-100"
                     onClick={() => handleDeleteBrowserAnnotation(annotation.id)}
                     aria-label={translate(
                       'auto.components.browser.pane.BrowserPane.f2d0c22d67',

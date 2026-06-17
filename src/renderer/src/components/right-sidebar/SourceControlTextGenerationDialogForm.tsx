@@ -45,6 +45,7 @@ type SourceControlTextGenerationDialogFormProps = {
   settings: GlobalSettings | null
   repo: Pick<Repo, 'id' | 'sourceControlAi'> | null
   baseParams: ResolvedSourceControlAiGenerationParams | null
+  basePromptPreview?: string
   saveTargets: SourceControlTextGenerationSaveTarget[]
   onGenerate: (params: ResolvedSourceControlAiGenerationParams) => void
   onOpenChange: (open: boolean) => void
@@ -78,6 +79,7 @@ export function SourceControlTextGenerationDialogForm({
   settings,
   repo,
   baseParams,
+  basePromptPreview,
   saveTargets,
   onGenerate,
   onOpenChange,
@@ -285,6 +287,7 @@ export function SourceControlTextGenerationDialogForm({
           />
           <SourceControlActionVariableChips
             actionId={actionId}
+            variablePreviews={basePromptPreview ? { basePrompt: basePromptPreview } : undefined}
             onInsert={(variable) => {
               const separator =
                 commandTemplate.endsWith('\n') || commandTemplate.length === 0 ? '' : ' '

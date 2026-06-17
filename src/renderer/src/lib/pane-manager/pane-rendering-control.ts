@@ -4,7 +4,8 @@ import {
   attachWebgl,
   disposeWebgl,
   markComplexScriptOutput,
-  redrawPane
+  redrawPane,
+  resetWebglTextureAtlas
 } from './pane-webgl-renderer'
 import { reattachWebglIfNeeded } from './pane-webgl-reattach'
 
@@ -59,5 +60,11 @@ export function resumePaneRendering(panes: Iterable<ManagedPaneInternal>): void 
   for (const pane of panes) {
     pane.webglAttachmentDeferred = false
     reattachWebglIfNeeded(pane)
+  }
+}
+
+export function resetPaneWebglTextureAtlases(panes: Iterable<ManagedPaneInternal>): void {
+  for (const pane of panes) {
+    resetWebglTextureAtlas(pane)
   }
 }
