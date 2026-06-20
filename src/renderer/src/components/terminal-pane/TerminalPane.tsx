@@ -5,6 +5,7 @@ import type { CSSProperties } from 'react'
 import type { IDisposable } from '@xterm/xterm'
 import { X } from 'lucide-react'
 import { useAppStore } from '../../store'
+import { isUnifiedTabPinned } from '@/store/pinned-tab-close-guard'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useLinkRoutingPreferenceDialog } from '@/components/link-routing-preference-dialog'
@@ -18,9 +19,9 @@ import {
 import type { ManagedPane, PaneManager } from '@/lib/pane-manager/pane-manager'
 import TerminalSearch from '@/components/TerminalSearch'
 import type { PtyTransport } from './pty-transport'
-import { fitPanes, isWindowsUserAgent, shellEscapePath } from './pane-helpers'
+import { fitPanes, isWindowsUserAgent } from './pane-helpers'
 import { getConnectionId } from '@/lib/connection-context'
-import { resolveTerminalDropTargetShell } from './terminal-drop-handler'
+import { handleInternalTerminalFileDrop } from './terminal-drop-handler'
 import { recordTerminalUserInputForLeaf } from './terminal-input-activity'
 import { EMPTY_LAYOUT, serializeTerminalLayout } from './layout-serialization'
 import { makePaneKey } from '../../../../shared/stable-pane-id'
@@ -40,8 +41,16 @@ import { TerminalErrorToast } from './TerminalErrorToast'
 import { TerminalSessionStateSaveFailureDialog } from './TerminalSessionStateSaveFailureDialog'
 import TerminalContextMenu from './TerminalContextMenu'
 import { TerminalAgentSessionForkDialog } from './TerminalAgentSessionForkDialog'
-import { SessionRestoredBanner } from './SessionRestoredBanner'
+import { SessionRestoredBannerPortals } from './SessionRestoredBannerPortals'
 import { useSessionRestoredBannerDismiss } from './useSessionRestoredBannerDismiss'
+import {
+  addSessionRestoredBannerPaneId,
+  dismissSessionRestoredBannerPaneIds,
+  pruneSessionRestoredBannerPaneIds,
+  removeSessionRestoredBannerPaneId,
+  syncSessionRestoredBannerTitleSpace,
+  type SessionRestoredBannerDismissEvent
+} from './session-restored-banner-pane-state'
 import { useSystemPrefersDark } from './use-system-prefers-dark'
 import { useTerminalPaneGlobalEffects } from './use-terminal-pane-global-effects'
 import { useTerminalPaneLifecycle } from './use-terminal-pane-lifecycle'
@@ -64,16 +73,27 @@ import {
 import { resolvePaneKeyForManager } from '@/lib/pane-manager/pane-key-resolution'
 import { safeFit } from '@/lib/pane-manager/pane-tree-ops'
 import { captureTerminalShutdownLayout } from './terminal-shutdown-layout-capture'
-import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspection'
-import { closeWebRuntimeTerminal } from '@/runtime/web-runtime-session'
+import {
+  inspectRuntimeTerminalProcess,
+  isRemoteRuntimePtyId
+} from '@/runtime/runtime-terminal-inspection'
+import {
+  clearWebRuntimeTerminalBuffer,
+  closeWebRuntimeTerminal,
+  updateWebRuntimePaneLayout
+} from '@/runtime/web-runtime-session'
 import { isPrimarySelectionEnabled, readPrimarySelectionText } from '@/lib/primary-selection'
-import { WORKSPACE_FILE_PATH_MIME } from '@/lib/workspace-file-drag'
+import { APP_MENU_PASTE_EVENT } from '@/lib/app-menu-paste'
+import { WORKSPACE_FILE_PATH_MIME, WORKSPACE_FILE_PATHS_MIME } from '@/lib/workspace-file-drag'
 import { isTerminalSessionStateSaveFailure } from '../../../../shared/terminal-session-state-save-failure'
 import {
   isSyntheticSinglePaneTitle,
   sanitizeTerminalLayoutPaneTitles
 } from '@/lib/terminal-pane-title-sanitization'
-import { planTerminalLiveLayoutInsertions } from './terminal-live-layout-reconciliation'
+import {
+  isHostAuthoritativeLayout,
+  planTerminalLiveLayoutInsertions
+} from './terminal-live-layout-reconciliation'
 import type { TerminalQuickCommand, TerminalQuickCommandScope } from '../../../../shared/types'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
 import { getRepoIdFromWorktreeId } from '../../../../shared/worktree-id'
@@ -97,6 +117,20 @@ import { restoreTerminalFitToDesktop, restoreTerminalFitsToDesktop } from './ter
 import { shutdownBufferCaptures } from './shutdown-buffer-captures'
 import { mergeCapturedLeafState } from './merge-captured-leaf-state'
 import { pasteTerminalText } from './terminal-bracketed-paste'
+import {
+  executeTerminalPastePlan,
+  planTerminalPasteWithYield,
+  type TerminalPasteSource,
+  type TerminalPasteTextOptions
+} from './terminal-paste-coordinator'
+import { formatTerminalPasteExecutionError } from './terminal-paste-errors'
+import { resolveTerminalPasteRuntime } from './terminal-paste-runtime'
+import { getTerminalPasteSshRemotePlatform } from './terminal-paste-ssh-platform'
+import {
+  isTerminalPanePasteFocusCurrent,
+  isTerminalPanePasteTargetCurrent
+} from './terminal-paste-target-state'
+import { writeTerminalPastePtyInput } from './terminal-pty-paste-writer'
 import {
   applyTerminalPaneAttentionToManager,
   subscribeTerminalPaneAttention
@@ -418,8 +452,8 @@ export default function TerminalPane({
   // xterm may not know multi-line text needs bracketed-paste protection.
   const forceBracketedMultilineTextPaste = isWindowsUserAgent()
   const [startup] = useState(() => useAppStore.getState().pendingStartupByTabId[tabId])
-  const [showSessionRestoredBanner, setShowSessionRestoredBanner] = useState(
-    () => startup?.showSessionRestoredBanner === true
+  const [sessionRestoredBannerPaneIds, setSessionRestoredBannerPaneIds] = useState<Set<number>>(
+    () => new Set()
   )
   const shouldMeasureHiddenStartup = startup !== undefined && !isVisible
   const consumeTabStartupCommand = useAppStore((store) => store.consumeTabStartupCommand)
@@ -435,11 +469,30 @@ export default function TerminalPane({
     }
   }, [startup, tabId, consumeTabStartupCommand])
 
-  const dismissSessionRestoredBanner = useCallback((): void => {
-    setShowSessionRestoredBanner(false)
+  const clearSessionRestoredBannerForPane = useCallback((paneId: number): void => {
+    setSessionRestoredBannerPaneIds((prev) => {
+      const next = removeSessionRestoredBannerPaneId(prev, paneId)
+      return next === prev ? prev : next
+    })
   }, [])
+
+  const showRestoredSessionBanner = useCallback((paneId: number): void => {
+    setSessionRestoredBannerPaneIds((prev) => {
+      const next = addSessionRestoredBannerPaneId(prev, paneId)
+      return next === prev ? prev : next
+    })
+  }, [])
+
+  const dismissSessionRestoredBanner = useCallback(
+    (event: SessionRestoredBannerDismissEvent): void => {
+      setSessionRestoredBannerPaneIds((prev) =>
+        dismissSessionRestoredBannerPaneIds(prev, event, managerRef.current?.getPanes() ?? [])
+      )
+    },
+    []
+  )
   useSessionRestoredBannerDismiss(
-    showSessionRestoredBanner,
+    sessionRestoredBannerPaneIds.size > 0,
     containerRef,
     dismissSessionRestoredBanner
   )
@@ -645,18 +698,37 @@ export default function TerminalPane({
       layout.titlesByLeafId = titlesByLeafId
     }
     setTabLayout(tabId, layout)
+    // Why: pane geometry is host-authoritative for remote-server tabs, so push
+    // ratios/expand/titles to the host or they revert on the next snapshot.
+    // Gate on a remote pty to avoid an RPC for purely-local tabs.
+    const hasRemotePane = Object.values(mergedPtyIds).some(
+      (ptyId) => typeof ptyId === 'string' && isRemoteRuntimePtyId(ptyId)
+    )
+    if (hasRemotePane) {
+      void updateWebRuntimePaneLayout({
+        worktreeId,
+        tabId,
+        root: layout.root,
+        expandedLeafId: layout.expandedLeafId,
+        ...(layout.titlesByLeafId ? { titlesByLeafId: layout.titlesByLeafId } : {})
+      })
+    }
     for (const leafId of currentLeafIds) {
       clearedScrollbackLeafIds.delete(leafId)
     }
-  }, [tabId, setTabLayout])
+  }, [tabId, setTabLayout, worktreeId])
 
   const clearPaneScrollback = useCallback(
     (pane: ManagedPane): void => {
       clearedScrollbackLeafIdsRef.current.add(pane.leafId)
       pane.terminal.clear()
+      // Why: also clear the host buffer for remote-server panes, or the next
+      // host snapshot replays the scrollback we just cleared locally.
+      const ptyId = paneTransportsRef.current.get(pane.id)?.getPtyId() ?? null
+      clearWebRuntimeTerminalBuffer(ptyId)
       persistLayoutSnapshot()
     },
-    [persistLayoutSnapshot]
+    [paneTransportsRef, persistLayoutSnapshot]
   )
 
   useEffect(() => {
@@ -769,6 +841,7 @@ export default function TerminalPane({
         // a single split pane doesn't go through closeTab.
         const ptyId = paneTransportsRef.current.get(paneId)?.getPtyId() ?? null
         closeWebRuntimeTerminal(ptyId)
+        clearSessionRestoredBannerForPane(paneId)
         const leafId = manager.getLeafId(paneId)
         if (leafId) {
           useAppStore.getState().setCacheTimerStartedAt(makePaneKey(tabId, leafId), null)
@@ -778,7 +851,7 @@ export default function TerminalPane({
         manager.closePane(paneId)
       }
     },
-    [onCloseTab, syncPanePtyLayoutBinding, tabId]
+    [clearSessionRestoredBannerForPane, onCloseTab, syncPanePtyLayoutBinding, tabId]
   )
 
   // Cmd+W handler — shows a confirmation dialog when the pane's shell has
@@ -800,6 +873,19 @@ export default function TerminalPane({
 
   const handleRequestClosePane = useCallback(
     (paneId: number) => {
+      // Why: when closing the last pane of a pinned tab, the pin confirmation
+      // takes precedence over the running-process prompt — let executeClosePane
+      // fall through to closeTerminalTab, which raises the single pin dialog
+      // (confirming it kills the process). Non-pinned tabs keep the process prompt.
+      const isLastPane = (managerRef.current?.getPanes().length ?? 0) <= 1
+      if (isLastPane) {
+        const state = useAppStore.getState()
+        const confirmPinned = state.settings?.confirmClosePinnedTab ?? true
+        if (confirmPinned && isUnifiedTabPinned(state, worktreeId, tabId)) {
+          executeClosePane(paneId)
+          return
+        }
+      }
       const transport = paneTransportsRef.current.get(paneId)
       const ptyId = transport?.getPtyId()
       if (!ptyId) {
@@ -821,7 +907,7 @@ export default function TerminalPane({
         // had a child process. Matches the semantics of the !ptyId branch above.
         .catch(() => executeClosePane(paneId))
     },
-    [executeClosePane, getCloseDialogCopyKind]
+    [executeClosePane, tabId, worktreeId, getCloseDialogCopyKind]
   )
 
   const handleSearchSelectedText = useCallback((selectedText: string): void => {
@@ -890,6 +976,7 @@ export default function TerminalPane({
     clearWorktreeUnread,
     clearTerminalTabUnread,
     clearTerminalPaneUnread,
+    onShowSessionRestoredBanner: showRestoredSessionBanner,
     dispatchNotification,
     setCacheTimerStartedAt,
     syncPanePtyLayoutBinding,
@@ -905,11 +992,19 @@ export default function TerminalPane({
   })
 
   useEffect(() => {
-    if (!(globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__) {
-      return
-    }
     const manager = managerRef.current
     if (!manager || !restoredLayout.root) {
+      return
+    }
+    // Host-owned split layouts (web clients, or a desktop client viewing a
+    // remote server worktree) arrive via the host snapshot, so the reconciler
+    // must materialize their panes; local desktop tabs split directly.
+    if (
+      !isHostAuthoritativeLayout({
+        isWebClient: !!(globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__,
+        ptyIdsByLeafId: restoredLayout.ptyIdsByLeafId
+      })
+    ) {
       return
     }
     const insertions = planTerminalLiveLayoutInsertions(
@@ -1098,6 +1193,7 @@ export default function TerminalPane({
         clearWorktreeUnread,
         clearTerminalTabUnread,
         clearTerminalPaneUnread,
+        onShowSessionRestoredBanner: showRestoredSessionBanner,
         dispatchNotification,
         setCacheTimerStartedAt,
         syncPanePtyLayoutBinding
@@ -1117,6 +1213,7 @@ export default function TerminalPane({
       clearWorktreeUnread,
       clearTerminalTabUnread,
       clearTerminalPaneUnread,
+      showRestoredSessionBanner,
       onPtyExitRef,
       setCacheTimerStartedAt,
       setRuntimePaneTitle,
@@ -1325,34 +1422,110 @@ export default function TerminalPane({
       return
     }
 
-    const pasteFromClipboard = (pane: ManagedPane): void => {
-      const connectionId = getConnectionId(worktreeId) ?? null
-      void pasteTerminalClipboard({
-        readClipboardText: window.api.ui.readClipboardText,
-        saveClipboardImageAsTempFile: window.api.ui.saveClipboardImageAsTempFile,
-        connectionId,
-        forceBracketedMultilineTextPaste,
-        pasteText: (text, options) => {
-          pasteTerminalText(pane.terminal, text, options)
-          if (text) {
-            recordTerminalUserInputForLeaf(tabId, pane.leafId)
-          }
-          if (options?.recoverImagePasteWebglAtlas) {
-            scheduleImagePasteWebglAtlasRecovery()
-          }
-        },
-        onImagePasteError: (error) => setTerminalError(formatClipboardImagePasteError(error))
-      }).catch(() => {
-        /* ignore clipboard failures */
-      })
-    }
-
     const isMac = navigator.userAgent.includes('Mac')
     const shortcutPlatform: NodeJS.Platform = isMac
       ? 'darwin'
       : navigator.userAgent.includes('Windows')
         ? 'win32'
         : 'linux'
+
+    const isPanePasteTargetMounted = (
+      pane: ManagedPane,
+      transport: PtyTransport | undefined,
+      ptyId: string | null
+    ): boolean => {
+      return isTerminalPanePasteTargetCurrent({
+        manager: managerRef.current,
+        paneTransports: paneTransportsRef.current,
+        paneId: pane.id,
+        leafId: pane.leafId,
+        transport,
+        ptyId
+      })
+    }
+
+    const executePanePasteText = async (
+      pane: ManagedPane,
+      source: TerminalPasteSource,
+      activeElementAtDispatch: Element | null,
+      text: string,
+      options?: TerminalPasteTextOptions
+    ): Promise<void> => {
+      const connectionId = getConnectionId(worktreeId) ?? null
+      const transport = paneTransportsRef.current.get(pane.id)
+      const ptyId = transport?.getPtyId() ?? null
+      const keyboardOwnedPaste =
+        source === 'keyboard' || source === 'paste-event' || source === 'app-menu'
+      const plan = await planTerminalPasteWithYield({
+        text,
+        source,
+        target: {
+          kind: 'terminal',
+          paneId: pane.id,
+          leafId: pane.leafId,
+          ptyId,
+          runtime: resolveTerminalPasteRuntime({
+            platform: shortcutPlatform,
+            ptyId,
+            connectionId,
+            remotePlatform: getTerminalPasteSshRemotePlatform(connectionId),
+            transport,
+            isWindowsConpty: forceBracketedMultilineTextPaste
+          })
+        },
+        forceBracketedPaste: options?.forceBracketedPaste,
+        forceBracketedPasteForMultiline: options?.forceBracketedPasteForMultiline,
+        terminalBracketedPasteMode: pane.terminal.modes.bracketedPasteMode
+      })
+      const execution = await executeTerminalPastePlan(plan, {
+        pasteText: (pasteText, pasteOptions) =>
+          pasteTerminalText(pane.terminal, pasteText, pasteOptions),
+        writePty: (data) => writeTerminalPastePtyInput(transport, data),
+        isTargetCurrent: () => {
+          if (!isPanePasteTargetMounted(pane, transport, ptyId)) {
+            return false
+          }
+          return isTerminalPanePasteFocusCurrent({
+            requireSameFocusedElement: keyboardOwnedPaste,
+            activeElementAtDispatch,
+            paneContainer: pane.container
+          })
+        },
+        canContinue: () => isPanePasteTargetMounted(pane, transport, ptyId)
+      })
+      if (execution.status !== 'pasted') {
+        setTerminalError(formatTerminalPasteExecutionError(execution.reason))
+        return
+      }
+      if (text) {
+        recordTerminalUserInputForLeaf(tabId, pane.leafId)
+      }
+      if (options?.recoverImagePasteWebglAtlas) {
+        scheduleImagePasteWebglAtlasRecovery()
+      }
+    }
+
+    const pasteFromClipboard = (
+      pane: ManagedPane,
+      source: Extract<TerminalPasteSource, 'keyboard' | 'paste-event'>
+    ): void => {
+      const connectionId = getConnectionId(worktreeId) ?? null
+      const activeElementAtDispatch = document.activeElement
+      void pasteTerminalClipboard({
+        readClipboardText: window.api.ui.readClipboardText,
+        saveClipboardImageAsTempFile: window.api.ui.saveClipboardImageAsTempFile,
+        connectionId,
+        forceBracketedMultilineTextPaste,
+        pasteText: (text, options) =>
+          executePanePasteText(pane, source, activeElementAtDispatch, text, options),
+        onTextPasteError: () =>
+          setTerminalError('Paste failed: clipboard text is too large for a safe terminal paste.'),
+        onImagePasteError: (error) => setTerminalError(formatClipboardImagePasteError(error))
+      }).catch(() => {
+        setTerminalError('Paste failed.')
+      })
+    }
+
     let suppressNextNativePaste = false
     let pasteSuppressionTimerId: number | null = null
     const shouldSuppressNativePaste = (e: KeyboardEvent): boolean => {
@@ -1401,7 +1574,15 @@ export default function TerminalPane({
       if (!pane) {
         return
       }
-      pasteFromClipboard(pane)
+      suppressNextNativePaste = true
+      if (pasteSuppressionTimerId !== null) {
+        window.clearTimeout(pasteSuppressionTimerId)
+      }
+      pasteSuppressionTimerId = window.setTimeout(() => {
+        pasteSuppressionTimerId = null
+        suppressNextNativePaste = false
+      }, 0)
+      pasteFromClipboard(pane, 'keyboard')
     }
 
     // Fallback: handle paste events triggered by non-keyboard sources
@@ -1431,17 +1612,54 @@ export default function TerminalPane({
       if (!pane) {
         return
       }
-      pasteFromClipboard(pane)
+      pasteFromClipboard(pane, 'paste-event')
+    }
+
+    const onAppMenuPaste = (event: Event): void => {
+      const activeElementAtDispatch = document.activeElement
+      if (
+        !(activeElementAtDispatch instanceof Element) ||
+        !container.contains(activeElementAtDispatch) ||
+        activeElementAtDispatch.closest('[data-terminal-search-root]')
+      ) {
+        return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+      const manager = managerRef.current
+      if (!manager) {
+        return
+      }
+      const pane = manager.getActivePane() ?? manager.getPanes()[0]
+      if (!pane) {
+        return
+      }
+      const connectionId = getConnectionId(worktreeId) ?? null
+      void pasteTerminalClipboard({
+        readClipboardText: window.api.ui.readClipboardText,
+        saveClipboardImageAsTempFile: window.api.ui.saveClipboardImageAsTempFile,
+        connectionId,
+        forceBracketedMultilineTextPaste,
+        pasteText: (text, options) =>
+          executePanePasteText(pane, 'app-menu', activeElementAtDispatch, text, options),
+        onTextPasteError: () =>
+          setTerminalError('Paste failed: clipboard text is too large for a safe terminal paste.'),
+        onImagePasteError: (error) => setTerminalError(formatClipboardImagePasteError(error))
+      }).catch(() => {
+        setTerminalError('Paste failed.')
+      })
     }
 
     container.addEventListener('keydown', onKeyPaste, { capture: true })
     container.addEventListener('paste', onPaste, { capture: true })
+    window.addEventListener(APP_MENU_PASTE_EVENT, onAppMenuPaste)
     return () => {
       if (pasteSuppressionTimerId !== null) {
         window.clearTimeout(pasteSuppressionTimerId)
       }
       container.removeEventListener('keydown', onKeyPaste, { capture: true })
       container.removeEventListener('paste', onPaste, { capture: true })
+      window.removeEventListener(APP_MENU_PASTE_EVENT, onAppMenuPaste)
     }
   }, [isActive, worktreeId, keybindings, forceBracketedMultilineTextPaste, tabId])
 
@@ -1506,29 +1724,30 @@ export default function TerminalPane({
     if (!manager) {
       return
     }
-    let needsFit = false
-    for (const pane of manager.getPanes()) {
-      // Show the title bar space when the pane has a title, is being
-      // inline-edited, or has transient startup chrome.
-      // Unread activity does NOT reserve title-bar space — the bell is
-      // rendered as an absolutely-positioned overlay in the pane's top-right
-      // corner so it can appear and disappear without shifting terminal
-      // content, avoiding the jarring reflow on bell toggles.
-      const shouldShow =
-        !!paneTitles[pane.id] || renamingPaneId === pane.id || showSessionRestoredBanner
-      const hadTitle = pane.container.hasAttribute('data-has-title')
-      if (shouldShow && !hadTitle) {
-        pane.container.setAttribute('data-has-title', '')
-        needsFit = true
-      } else if (!shouldShow && hadTitle) {
-        pane.container.removeAttribute('data-has-title')
-        needsFit = true
-      }
-    }
+    // Show the title bar space when the pane has a title, is being
+    // inline-edited, or has transient startup chrome. Unread activity does
+    // not reserve this space; its overlay should not reflow terminal content.
+    const needsFit = syncSessionRestoredBannerTitleSpace({
+      panes: manager.getPanes(),
+      paneTitles,
+      renamingPaneId,
+      sessionRestoredBannerPaneIds
+    })
     if (needsFit) {
       fitPanes(manager)
     }
-  }, [paneCount, paneTitles, renamingPaneId, showSessionRestoredBanner])
+  }, [paneCount, paneTitles, renamingPaneId, sessionRestoredBannerPaneIds])
+
+  useEffect(() => {
+    const manager = managerRef.current
+    if (!manager) {
+      return
+    }
+    setSessionRestoredBannerPaneIds((prev) => {
+      const next = pruneSessionRestoredBannerPaneIds(prev, manager.getPanes())
+      return next === prev ? prev : next
+    })
+  }, [paneCount])
 
   // Register a capture callback for shutdown. The beforeunload handler in
   // App.tsx calls all registered callbacks to serialize terminal buffers.
@@ -1866,14 +2085,67 @@ export default function TerminalPane({
       event.preventDefault()
       event.stopPropagation()
       clickedPane.terminal.focus()
-      void readPrimarySelectionText().then((text) => {
-        if (text) {
-          pasteTerminalText(clickedPane.terminal, text)
-          recordTerminalUserInputForLeaf(tabId, clickedPane.leafId)
+      void readPrimarySelectionText().then(async (text) => {
+        if (!text) {
+          return
         }
+        const transport = paneTransportsRef.current.get(clickedPane.id)
+        const ptyId = transport?.getPtyId() ?? null
+        const isMac = navigator.userAgent.includes('Mac')
+        const shortcutPlatform: NodeJS.Platform = isMac
+          ? 'darwin'
+          : navigator.userAgent.includes('Windows')
+            ? 'win32'
+            : 'linux'
+        const connectionId = getConnectionId(worktreeId) ?? null
+        const targetStillMounted = (): boolean => {
+          const manager = managerRef.current
+          return Boolean(
+            manager
+              ?.getPanes()
+              .some(
+                (livePane) =>
+                  livePane.id === clickedPane.id && livePane.leafId === clickedPane.leafId
+              ) &&
+            transport &&
+            paneTransportsRef.current.get(clickedPane.id) === transport &&
+            transport.isConnected() &&
+            transport.getPtyId() === ptyId
+          )
+        }
+        const plan = await planTerminalPasteWithYield({
+          text,
+          source: 'middle-click',
+          target: {
+            kind: 'terminal',
+            paneId: clickedPane.id,
+            leafId: clickedPane.leafId,
+            ptyId,
+            runtime: resolveTerminalPasteRuntime({
+              platform: shortcutPlatform,
+              ptyId,
+              connectionId,
+              remotePlatform: getTerminalPasteSshRemotePlatform(connectionId),
+              transport
+            })
+          },
+          terminalBracketedPasteMode: clickedPane.terminal.modes.bracketedPasteMode
+        })
+        const execution = await executeTerminalPastePlan(plan, {
+          pasteText: (pasteText, pasteOptions) =>
+            pasteTerminalText(clickedPane.terminal, pasteText, pasteOptions),
+          writePty: (data) => writeTerminalPastePtyInput(transport, data),
+          isTargetCurrent: targetStillMounted,
+          canContinue: targetStillMounted
+        })
+        if (execution.status !== 'pasted') {
+          setTerminalError(formatTerminalPasteExecutionError(execution.reason))
+          return
+        }
+        recordTerminalUserInputForLeaf(tabId, clickedPane.leafId)
       })
     },
-    [getPrimarySelectionMiddleClickPane, tabId]
+    [getPrimarySelectionMiddleClickPane, tabId, worktreeId]
   )
 
   const handlePrimarySelectionAuxClick = useCallback(
@@ -1935,14 +2207,19 @@ export default function TerminalPane({
         onMouseDownCapture={handlePrimarySelectionMiddleMouseDown}
         onAuxClickCapture={handlePrimarySelectionAuxClick}
         onDragOver={(e) => {
-          if (e.dataTransfer.types.includes(WORKSPACE_FILE_PATH_MIME)) {
+          if (
+            e.dataTransfer.types.includes(WORKSPACE_FILE_PATH_MIME) ||
+            e.dataTransfer.types.includes(WORKSPACE_FILE_PATHS_MIME)
+          ) {
             e.preventDefault()
             e.dataTransfer.dropEffect = 'copy'
           }
         }}
         onDrop={(e) => {
-          const filePath = e.dataTransfer.getData(WORKSPACE_FILE_PATH_MIME)
-          if (!filePath) {
+          if (
+            !e.dataTransfer.types.includes(WORKSPACE_FILE_PATH_MIME) &&
+            !e.dataTransfer.types.includes(WORKSPACE_FILE_PATHS_MIME)
+          ) {
             return
           }
           e.preventDefault()
@@ -1951,37 +2228,15 @@ export default function TerminalPane({
           if (!manager) {
             return
           }
-          const pane = manager.getActivePane() ?? manager.getPanes()[0]
-          if (!pane) {
-            return
-          }
-          const transport = paneTransportsRef.current.get(pane.id)
-          if (!transport) {
-            return
-          }
-          const state = useAppStore.getState()
-          const worktreePath =
-            Object.values(state.worktreesByRepo ?? {})
-              .flat()
-              .find((worktree) => worktree.id === worktreeId)?.path ??
-            cwd ??
-            filePath
-          const targetShell = resolveTerminalDropTargetShell({
-            activeRuntimeEnvironmentId: state.settings?.activeRuntimeEnvironmentId,
-            worktreePath,
-            // Why: internal Explorer drags paste a worktree-absolute path
-            // directly into the target shell. Runtime drops use the runtime
-            // worktree's path shape; legacy SSH drops remain POSIX.
-            connectionId: getConnectionId(worktreeId)
+          void handleInternalTerminalFileDrop({
+            manager,
+            paneTransports: paneTransportsRef.current,
+            worktreeId,
+            tabId,
+            cwd,
+            dataTransfer: e.dataTransfer,
+            dropTarget: e.target
           })
-          if (transport.sendInput(shellEscapePath(filePath, targetShell))) {
-            recordTerminalUserInputForLeaf(tabId, pane.leafId)
-          }
-          // Move focus to the terminal so the user can keep typing where the
-          // dropped path just landed. Without this, focus stays on the file
-          // tree row that originated the drag and subsequent keystrokes do
-          // not reach the pty — #978.
-          pane.terminal.focus()
         }}
       />
       {terminalError && isActive && (
@@ -2009,15 +2264,10 @@ export default function TerminalPane({
           />,
           activePane.container
         )}
-      {showSessionRestoredBanner &&
-        activePane?.container &&
-        createPortal(
-          // Why: resumed Codex TUIs repaint xterm immediately, so the wake marker
-          // must live in the pane chrome instead of the PTY byte stream.
-          <SessionRestoredBanner visible />,
-          activePane.container,
-          'session-restored-banner'
-        )}
+      <SessionRestoredBannerPortals
+        panes={managerRef.current?.getPanes() ?? []}
+        paneIds={sessionRestoredBannerPaneIds}
+      />
       <TerminalContextMenu
         open={contextMenu.open}
         onOpenChange={contextMenu.setOpen}
@@ -2049,6 +2299,7 @@ export default function TerminalPane({
         }
         onToggleExpand={contextMenu.onToggleExpand}
         onSetTitle={contextMenu.onSetTitle}
+        onCopyTerminalId={() => void contextMenu.onCopyTerminalId()}
         onCopyPaneId={contextMenu.onCopyPaneId}
       />
       {/* Why: repos is a broad store slice; only subscribe while the editor is visible. */}

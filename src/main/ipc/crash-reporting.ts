@@ -11,6 +11,7 @@ import {
   type CrashReportSubmitResult,
   formatCrashReportText,
   formatUncapturedCrashReportText,
+  sanitizeCrashReportDetails,
   sanitizeCrashReportString
 } from '../../shared/crash-reporting'
 import { submitFeedback } from './feedback'
@@ -21,7 +22,12 @@ import {
 } from '../crash-reporting/crash-breadcrumb-store'
 import { collectDiagnosticBundle, getDiagnosticsStatus } from '../observability'
 import { resolveDiagnosticOrcaChannel } from '../observability/diagnostic-upload-endpoint'
+import { startSpan } from '../observability/tracer'
 import type { FeedbackDiagnosticBundleAttachment } from './feedback'
+import {
+  assertClipboardTextWriteWithinLimit,
+  isClipboardTextWriteTooLargeError
+} from '../../shared/clipboard-text'
 
 const inFlightSubmissions = new Set<string>()
 const submittedReportIds = new Set<string>()
@@ -268,15 +274,32 @@ function sanitizeRendererBreadcrumbData(value: unknown): CrashReportBreadcrumbDa
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined
   }
-  const sanitized: CrashReportBreadcrumbData = {}
+  const primitiveData: Record<string, unknown> = {}
   for (const [key, entry] of Object.entries(value)) {
     if (typeof entry === 'string' || typeof entry === 'boolean' || entry === null) {
-      sanitized[key] = entry
+      primitiveData[key] = entry
     } else if (typeof entry === 'number' && Number.isFinite(entry)) {
-      sanitized[key] = entry
+      primitiveData[key] = entry
     }
   }
+  const sanitized = sanitizeCrashReportDetails(primitiveData)
   return Object.keys(sanitized).length > 0 ? sanitized : undefined
+}
+
+function recordRendererBreadcrumbTrace(
+  name: string,
+  data: CrashReportBreadcrumbData | undefined
+): void {
+  const span = startSpan('renderer.breadcrumb', {
+    attributes: {
+      kind: 'crash-breadcrumb',
+      'breadcrumb.name': sanitizeCrashReportString(name),
+      ...(data ? { 'breadcrumb.data': data } : {})
+    }
+  })
+  // Why: main-process native crashes cannot persist memory-only breadcrumbs.
+  // A tiny trace span gives the next crash report durable pre-crash context.
+  span.end()
 }
 
 function formatUnknownError(error: unknown): string {
@@ -380,7 +403,9 @@ export function registerCrashReportingHandlers(store: CrashReportStore): void {
       if (!args || typeof args.name !== 'string') {
         return
       }
-      recordCrashBreadcrumb(args.name, sanitizeRendererBreadcrumbData(args.data))
+      const data = sanitizeRendererBreadcrumbData(args.data)
+      recordCrashBreadcrumb(args.name, data)
+      recordRendererBreadcrumbTrace(args.name, data)
     }
   )
 
@@ -393,7 +418,16 @@ export function registerCrashReportingHandlers(store: CrashReportStore): void {
         clipboard.writeText(buildUncapturedCrashReportText(args?.notes))
         return { ok: true as const }
       }
-      clipboard.writeText(formatCrashReportText(report, args?.notes))
+      try {
+        clipboard.writeText(
+          assertClipboardTextWriteWithinLimit(formatCrashReportText(report, args?.notes))
+        )
+      } catch (error) {
+        if (isClipboardTextWriteTooLargeError(error)) {
+          return { ok: false as const, error: 'Crash diagnostics are too large to copy safely.' }
+        }
+        throw error
+      }
       return { ok: true as const }
     }
   )

@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import type { Page } from '@stablyai/playwright-test'
 import { expect } from '@stablyai/playwright-test'
-import { getTerminalContent, sendToTerminal } from './helpers/terminal'
+import { sendToTerminal } from './helpers/terminal'
+import {
+  getTerminalContentForPtyId,
+  waitForPtyPaneMounted,
+  waitForPtyShellEcho
+} from './terminal-pty-readiness'
 
 type TerminalColumnProbeWindow = Window & {
   __store?: {
@@ -63,30 +68,66 @@ export async function waitForPtyColumnsAtMost(
   timeoutMs = 30_000
 ): Promise<number> {
   const deadline = Date.now() + timeoutMs
-  let observedCols = 0
+  await waitForPtyPaneMounted(page, ptyId, Math.min(10_000, timeoutMs))
+  await waitForPtyShellEcho(page, ptyId, Math.min(15_000, Math.max(0, deadline - Date.now())))
+  let markerObserved = false
+  let lastObservedCols: number | null = null
+  let lastMarker = ''
+  let lastTerminalTail = ''
   while (Date.now() < deadline) {
     const marker = `ORCA_PTY_COLUMNS_${randomUUID()}`
+    lastMarker = marker
+    // Why: a few CI shells occasionally eat the first printable byte when a
+    // command is written immediately after Ctrl+C/Ctrl+U. Split control bytes
+    // from the probe command so the shell sees the whole `node` executable.
+    await sendToTerminal(page, ptyId, '\x03')
+    await page.waitForTimeout(50)
+    await sendToTerminal(page, ptyId, '\x15')
+    await page.waitForTimeout(50)
     await sendToTerminal(
       page,
       ptyId,
-      `\x03\x15node -e ${JSON.stringify(
-        `console.log('${marker}:' + (process.stdout.columns || 0))`
-      )}\r`
+      `node -e ${JSON.stringify(`console.log('${marker}:' + (process.stdout.columns || 0))`)}\r`
     )
-    const probeDeadline = Date.now() + Math.min(3_000, Math.max(1_000, deadline - Date.now()))
+    const probeDeadline = Date.now() + Math.min(5_000, Math.max(0, deadline - Date.now()))
     while (Date.now() < probeDeadline) {
-      const content = await getTerminalContent(page, 30_000)
+      const content = await getTerminalContentForPtyId(page, ptyId, 30_000)
+      lastTerminalTail = content
       const match = content.match(new RegExp(`${marker}:(\\d+)`))
-      observedCols = Number(match?.[1] ?? 0)
+      const observedCols = Number(match?.[1] ?? 0)
       if (observedCols > 0) {
+        markerObserved = true
+        lastObservedCols = observedCols
         break
       }
       await page.waitForTimeout(100)
     }
-    if (observedCols > 0 && observedCols <= maxCols) {
-      return observedCols
+    if (lastObservedCols !== null && lastObservedCols <= maxCols) {
+      return lastObservedCols
     }
-    await page.waitForTimeout(250)
+    const retryDelayMs = Math.min(250, Math.max(0, deadline - Date.now()))
+    if (retryDelayMs > 0) {
+      await page.waitForTimeout(retryDelayMs)
+    }
   }
-  throw new Error(`PTY columns stayed above ${maxCols}; last observed ${observedCols}`)
+  lastTerminalTail = await getTerminalContentForPtyId(page, ptyId, 30_000)
+  const finalState = {
+    lastMarker,
+    markerObserved,
+    lastObservedCols,
+    maxCols,
+    terminalTail: lastTerminalTail.slice(-4_000)
+  }
+  if (!markerObserved) {
+    throw new Error(
+      `PTY column probe never observed a marker within ${timeoutMs}ms; final state ${JSON.stringify(
+        finalState
+      )}`
+    )
+  }
+  throw new Error(
+    `PTY columns stayed above ${maxCols}; last observed ${lastObservedCols}; final state ${JSON.stringify(
+      finalState
+    )}`
+  )
 }

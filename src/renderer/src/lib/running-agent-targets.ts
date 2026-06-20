@@ -7,9 +7,9 @@ import type { TerminalTab } from '../../../shared/types'
 import { parsePaneKey } from '../../../shared/stable-pane-id'
 import { isExplicitAgentStatusFresh } from './agent-status'
 
-type RunningAgentTargetState = Pick<
+export type RunningAgentTargetState = Pick<
   AppState,
-  'agentStatusByPaneKey' | 'tabsByWorktree' | 'terminalLayoutsByTabId'
+  'agentStatusByPaneKey' | 'tabsByWorktree' | 'terminalLayoutsByTabId' | 'ptyIdsByTabId'
 >
 
 export type RunningAgentSendTarget = {
@@ -46,8 +46,13 @@ export function deriveRunningAgentSendTargets(
       continue
     }
 
+    const layoutPtyId =
+      state.terminalLayoutsByTabId?.[parsed.tabId]?.ptyIdsByLeafId?.[parsed.leafId] ?? null
+    const tabPtyIds = state.ptyIdsByTabId?.[parsed.tabId]
     const ptyId =
-      state.terminalLayoutsByTabId[parsed.tabId]?.ptyIdsByLeafId?.[parsed.leafId] ?? null
+      layoutPtyId && (tabPtyIds === undefined || tabPtyIds.includes(layoutPtyId))
+        ? layoutPtyId
+        : null
     let disabledReason: string | undefined
 
     if (!isExplicitAgentStatusFresh(entry, now, AGENT_STATUS_STALE_AFTER_MS)) {

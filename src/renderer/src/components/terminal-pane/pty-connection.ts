@@ -14,6 +14,11 @@ import type { PtyBufferSnapshot, PtyConnectResult } from './pty-transport'
 import { createIpcPtyTransport } from './pty-transport'
 import { createRemoteRuntimePtyTransport } from './remote-runtime-pty-transport'
 import { getConnectionId } from '@/lib/connection-context'
+import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
+import {
+  getCachedWindowsTerminalCapabilities,
+  hasCachedWindowsTerminalCapabilities
+} from '@/lib/windows-terminal-capabilities'
 import { shouldSeedCacheTimerOnInitialTitle } from './cache-timer-seeding'
 import type { PtyConnectionDeps } from './pty-connection-types'
 import { safeFit } from '@/lib/pane-manager/pane-tree-ops'
@@ -32,6 +37,8 @@ import {
   POST_REPLAY_REATTACH_RESET,
   RESET_TERMINAL_CURSOR_STYLE
 } from './layout-serialization'
+import { createShellReadyMarkerScanState, scanForShellReadyMarker } from './shell-ready-marker-scan'
+import { shouldUseShellReadyStartupDelivery } from '../../../../shared/codex-startup-delivery'
 import { getSystemPrefersDark } from '@/lib/terminal-theme'
 import {
   mode2031SequenceFor,
@@ -71,9 +78,12 @@ import { createAgentCompletionCoordinator } from './agent-completion-coordinator
 import type { AgentCompletionStatusSnapshot } from './agent-completion-coordinator-types'
 import {
   markTerminalBracketedPasteInterrupted,
-  observeTerminalBracketedPasteModeOutput,
-  pasteTerminalText
+  observeTerminalBracketedPasteModeOutput
 } from './terminal-bracketed-paste'
+import { executeTerminalStartupCommandPaste } from './terminal-startup-command-paste'
+import { getTerminalPasteSshRemotePlatform } from './terminal-paste-ssh-platform'
+import { resolveTerminalPasteRuntime } from './terminal-paste-runtime'
+import { isCodexTerminalStartupCommand } from './terminal-startup-command-classifier'
 import { createCommandCodeOutputStatusDetector } from './command-code-output-status'
 import type { PtyDataMeta } from './pty-dispatcher'
 import { getEagerPtyBufferHandle } from './pty-dispatcher'
@@ -90,6 +100,7 @@ import {
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { CLIENT_PLATFORM } from '@/lib/new-workspace'
 import { buildAgentResumeStartupPlan } from '@/lib/tui-agent-startup'
+import { resolveAgentStatusTerminalTitle } from '@/lib/agent-status-terminal-title'
 import {
   resolveTuiAgentLaunchArgs,
   resolveTuiAgentLaunchEnv
@@ -108,11 +119,11 @@ const AGENT_TASK_COMPLETE_NOTIFICATION_GRACE_MS = 250
 const AGENT_TASK_COMPLETE_NOTIFICATION_MAX_WAIT_MS = 1500
 const AGENT_TASK_COMPLETE_NOTIFICATION_DETAIL_MAX_AGE_MS = 10_000
 const COMMAND_CODE_OUTPUT_DONE_SETTLE_MS = 1500
+const SSH_SHELL_READY_STARTUP_FALLBACK_MS = 1500
 const HIDDEN_OUTPUT_RESTORE_SCROLLBACK_ROWS = 5000
 const HIDDEN_OUTPUT_RESTORE_PENDING_CHARS = 512 * 1024
 const HIDDEN_OUTPUT_RESTORE_DEFERRED_RETRY_MS = 50
 const HIDDEN_OUTPUT_RESTORE_DEFERRED_RETRY_MAX = 3
-const STARTUP_COMMAND_EXTENSION_RE = /\.(?:exe|cmd|bat|ps1)$/i
 const TERMINAL_RENDERER_RISK_SCAN_TAIL_CHARS = 256
 const CURSOR_SHOW_SEQUENCE = '\x1b[?25h'
 const CURSOR_HIDE_SEQUENCE = '\x1b[?25l'
@@ -129,8 +140,6 @@ const INACTIVE_FOREGROUND_IMMEDIATE_BUDGET_CHARS = 32 * 1024
 // terminal state is unavailable, so the user has an explicit loss signal.
 const HIDDEN_OUTPUT_RESTORE_UNAVAILABLE_WARNING =
   '\x18\x1b[0m\r\n[Orca skipped hidden terminal output because main recovery was unavailable.]\r\n'
-const SESSION_RESTORED_BANNER = '\r\n\x1b[2m--- session restored ---\x1b[0m\r\n\r\n'
-
 type E2eTerminalPtyDataInjectionApi = {
   inject: (paneKey: string, data: string, meta?: PtyDataMeta) => boolean
   keys: () => string[]
@@ -282,31 +291,13 @@ function readE2eHiddenSnapshotOverride(ptyId: string): Promise<PtyBufferSnapshot
   })
 }
 
-function firstStartupCommandToken(command: string): string {
-  const trimmed = command.trim()
-  const quote = trimmed[0]
-  if ((quote === '"' || quote === "'") && trimmed.length > 1) {
-    const end = trimmed.indexOf(quote, 1)
-    if (end > 1) {
-      return trimmed.slice(1, end)
-    }
-  }
-  return trimmed.split(/\s+/)[0] ?? ''
-}
-
-function isCodexStartupCommand(command: string): boolean {
-  const executable = firstStartupCommandToken(command)
-    .split(/[\\/]/)
-    .pop()
-    ?.toLowerCase()
-    .replace(STARTUP_COMMAND_EXTENSION_RE, '')
-  return executable === 'codex' || executable?.startsWith('codex-') === true
-}
-
 function shouldKeepHiddenStartupRendererQueriesLive(
   startup: PtyConnectionDeps['startup']
 ): boolean {
-  return startup?.telemetry?.agent_kind === 'codex' || isCodexStartupCommand(startup?.command ?? '')
+  return (
+    startup?.telemetry?.agent_kind === 'codex' ||
+    isCodexTerminalStartupCommand(startup?.command ?? '')
+  )
 }
 
 function containsHiddenStartupRendererQuery(data: string): boolean {
@@ -789,6 +780,7 @@ export function connectPanePty(
   let cleanupHiddenOutputRestoreDeferredRetry = (): void => {}
   let unregisterE2ePtyDataInjection = (): void => {}
   let startupInjectTimer: ReturnType<typeof setTimeout> | null = null
+  let sshShellReadyFallbackTimer: ReturnType<typeof setTimeout> | null = null
   let agentTaskCompleteNotificationGraceTimer: ReturnType<typeof setTimeout> | null = null
   let agentTaskCompleteNotificationMaxTimer: ReturnType<typeof setTimeout> | null = null
   let agentTaskCompleteStatusUnsubscribe: (() => void) | null = null
@@ -1633,6 +1625,16 @@ export function connectPanePty(
       : null) ?? (tab?.ptyId ? getRemoteRuntimePtyEnvironmentId(tab.ptyId) : null)
   const runtimeEnvironmentId =
     remoteRuntimeOwnerForTransport ?? getRuntimeEnvironmentIdForWorktree(state, deps.worktreeId)
+  const localWindowsTerminalCapabilities = hasCachedWindowsTerminalCapabilities()
+    ? getCachedWindowsTerminalCapabilities()
+    : null
+  const projectRuntime =
+    !connectionId && runtimeEnvironmentId === null
+      ? getLocalProjectExecutionRuntimeContext(state, deps.worktreeId, undefined, {
+          wslAvailable: localWindowsTerminalCapabilities?.wslAvailable,
+          availableWslDistros: localWindowsTerminalCapabilities?.wslDistros ?? null
+        })
+      : undefined
   const shouldOwnAgentStatusInRenderer = runtimeEnvironmentId !== null
   const shouldDeliverStartupViaTerminalPaste = paneStartup?.delivery === 'terminal-paste'
   const hadExistingPaneTransportAtConnect = deps.paneTransportsRef.current.size > 0
@@ -1652,6 +1654,9 @@ export function connectPanePty(
     cwd: deps.cwd,
     env: paneEnv,
     command: shouldDeliverStartupViaTerminalPaste ? undefined : paneStartup?.command,
+    startupCommandDelivery: shouldDeliverStartupViaTerminalPaste
+      ? undefined
+      : paneStartup?.startupCommandDelivery,
     connectionId,
     worktreeId: deps.worktreeId,
     // Why: closes the SIGKILL race documented in INVESTIGATION.md by letting
@@ -1662,6 +1667,7 @@ export function connectPanePty(
     leafId: pane.leafId,
     activate: deps.isActiveRef.current && deps.isVisibleRef.current,
     ...(shellOverride ? { shellOverride } : {}),
+    ...(projectRuntime ? { projectRuntime } : {}),
     ...(paneStartup?.telemetry ? { telemetry: paneStartup.telemetry } : {}),
     onPtyExit: onExit,
     onTitleChange,
@@ -1684,7 +1690,11 @@ export function connectPanePty(
             // be stored against a title that was never paired with it.
             const currentState = useAppStore.getState()
             const title = currentState.runtimePaneTitlesByTabId?.[deps.tabId]?.[pane.id]
-            currentState.setAgentStatus(cacheKey, payload, title)
+            currentState.setAgentStatus(
+              cacheKey,
+              payload,
+              resolveAgentStatusTerminalTitle(payload, title)
+            )
             if (syncAgentTaskCompleteTrackingEnabled()) {
               const storedStatus = useAppStore.getState().agentStatusByPaneKey[cacheKey]
               const notificationPayload =
@@ -1970,34 +1980,53 @@ export function connectPanePty(
     }
 
     // Why: for ordinary local startup commands, the local PTY provider already
-    // writes via the shell-ready barrier. terminal-paste startup commands must
-    // stay renderer-delivered so xterm can apply bracketed-paste semantics.
+    // writes via the shell-ready barrier. terminal-paste and SSH startup
+    // commands stay renderer-delivered so xterm/relay can apply their handling.
     let pendingStartupCommand =
       shouldDeliverStartupViaTerminalPaste || connectionId ? (paneStartup?.command ?? null) : null
-    let sessionRestoredBannerWritten = false
-    const writeSessionRestoredBanner = (writeBanner?: (data: string) => void): void => {
-      if (sessionRestoredBannerWritten) {
+    const shouldWaitForSshShellReady =
+      Boolean(connectionId) &&
+      shouldUseShellReadyStartupDelivery({
+        command: paneStartup?.command,
+        startupCommandDelivery: paneStartup?.startupCommandDelivery
+      }) &&
+      !shouldDeliverStartupViaTerminalPaste
+    const sshShellReadyMarkerScan = shouldWaitForSshShellReady
+      ? createShellReadyMarkerScanState()
+      : null
+    let sshStartupShellReady = !shouldWaitForSshShellReady
+    const markSshStartupShellReady = (): void => {
+      if (sshStartupShellReady) {
         return
       }
-      sessionRestoredBannerWritten = true
-      if (writeBanner) {
-        writeBanner(SESSION_RESTORED_BANNER)
+      sshStartupShellReady = true
+      if (sshShellReadyFallbackTimer !== null) {
+        clearTimeout(sshShellReadyFallbackTimer)
+        sshShellReadyFallbackTimer = null
+      }
+      schedulePendingStartupCommandDelivery()
+    }
+    let sessionRestoredBannerShown = false
+    const showSessionRestoredBanner = (): void => {
+      if (sessionRestoredBannerShown) {
         return
       }
-      writeTerminalOutput(pane.terminal, SESSION_RESTORED_BANNER, {
-        foreground: true,
-        beforeWrite: beforeTerminalOutputWrite
-      })
+      sessionRestoredBannerShown = true
+      deps.onShowSessionRestoredBanner(pane.id)
     }
     const getColdRestoreAgentResumePlatform = (): NodeJS.Platform => {
+      if (projectRuntime?.status === 'repair-required') {
+        return projectRuntime.repair.preferredRuntime.kind === 'wsl' ? 'linux' : CLIENT_PLATFORM
+      }
+      if (projectRuntime?.status === 'resolved' && projectRuntime.runtime.kind === 'wsl') {
+        return 'linux'
+      }
       if (connectionId || (worktree?.path && isWslUncPath(worktree.path))) {
         return 'linux'
       }
       return CLIENT_PLATFORM
     }
-    const prepareColdRestoreAgentResumeCommand = (
-      writeBanner?: (data: string) => void
-    ): boolean => {
+    const prepareColdRestoreAgentResumeCommand = (): boolean => {
       if (pendingStartupCommand) {
         return false
       }
@@ -2030,15 +2059,53 @@ export function connectPanePty(
       // session is still resumable, so the replacement shell must launch it.
       pendingStartupCommand = startupPlan.launchCommand
       if (sleepingRecord) {
-        writeSessionRestoredBanner(writeBanner)
+        showSessionRestoredBanner()
       }
       if (!useLiveEntry && sleepingRecord) {
         state.clearSleepingAgentSession(cacheKey)
       }
       return true
     }
+    const isStartupPasteTargetCurrent = (ptyId: string | null): boolean =>
+      !disposed &&
+      deps.paneTransportsRef.current.get(pane.id) === transport &&
+      transport.getPtyId() === ptyId
+    const runTerminalPasteStartupCommand = async (command: string): Promise<boolean> => {
+      const ptyId = transport.getPtyId()
+      const result = await executeTerminalStartupCommandPaste({
+        command,
+        pane,
+        ptyId,
+        runtime: resolveTerminalPasteRuntime({
+          platform: CLIENT_PLATFORM,
+          ptyId,
+          connectionId,
+          remotePlatform: getTerminalPasteSshRemotePlatform(connectionId),
+          transport,
+          isWindowsConpty: isNativeWindowsConpty
+        }),
+        transport,
+        isTargetCurrent: isStartupPasteTargetCurrent
+      })
+      if (result.status !== 'pasted' || !isStartupPasteTargetCurrent(ptyId)) {
+        return false
+      }
+      return transport.sendInput('\r')
+    }
     const schedulePendingStartupCommandDelivery = (): void => {
       if (!pendingStartupCommand) {
+        return
+      }
+      if (!sshStartupShellReady) {
+        if (sshShellReadyFallbackTimer === null) {
+          // Why: some SSH shells cannot emit Orca's ready marker. Prefer the
+          // marker when available, but fall back to the old renderer delivery
+          // behavior instead of dropping the startup command forever.
+          sshShellReadyFallbackTimer = setTimeout(() => {
+            sshShellReadyFallbackTimer = null
+            markSshStartupShellReady()
+          }, SSH_SHELL_READY_STARTUP_FALLBACK_MS)
+        }
         return
       }
       if (startupInjectTimer !== null) {
@@ -2058,10 +2125,7 @@ export function connectPanePty(
             return
           }
           if (shouldDeliverStartupViaTerminalPaste) {
-            // Why: this mode must pass through xterm so bracketed-paste
-            // wrapping is applied before the submit Enter.
-            pasteTerminalText(pane.terminal, command)
-            transport.sendInput('\r')
+            await runTerminalPasteStartupCommand(command)
           } else {
             transport.sendInput(`${command}\r`)
           }
@@ -2107,6 +2171,9 @@ export function connectPanePty(
             }
           } else if (typeof gen === 'number') {
             void window.api.pty.clearPendingPaneSerializer(cacheKey, gen).catch(() => {})
+          }
+          if (resolvedPtyId && connectionId) {
+            schedulePendingStartupCommandDelivery()
           }
           return resolvedPtyId
         })
@@ -2967,6 +3034,13 @@ export function connectPanePty(
         hasReceivedPtyOutput = true
         recordAgentHibernationPaneOutput(cacheKey)
       }
+      if (sshShellReadyMarkerScan) {
+        const scanned = scanForShellReadyMarker(sshShellReadyMarkerScan, data)
+        if (scanned.matched) {
+          markSshStartupShellReady()
+        }
+        data = scanned.output
+      }
       resetHiddenOutputRestoreIfPtyChanged()
       respondToTerminalPixelSizeQueries(data)
       observeTerminalBracketedPasteModeOutput(pane.terminal, data)
@@ -3132,7 +3206,7 @@ export function connectPanePty(
         // land in the new shell's stdin. See replay-guard.ts.
         writeReplayData('\x1b[2J\x1b[3J\x1b[H')
         writeReplayData(connectResult.coldRestore.scrollback)
-        const didPrepareResume = prepareColdRestoreAgentResumeCommand(writeReplayData)
+        const didPrepareResume = prepareColdRestoreAgentResumeCommand()
         // Cold-restore means the daemon lost the session and spawned a
         // fresh shell — no TUI is consuming the mode-setting bytes that a
         // crashed TUI (e.g. Claude's \e[?1004h) left in the scrollback, so
@@ -3689,6 +3763,10 @@ export function connectPanePty(
       if (startupInjectTimer !== null) {
         clearTimeout(startupInjectTimer)
         startupInjectTimer = null
+      }
+      if (sshShellReadyFallbackTimer !== null) {
+        clearTimeout(sshShellReadyFallbackTimer)
+        sshShellReadyFallbackTimer = null
       }
       clearPendingAgentTaskCompleteNotification()
       pendingTerminalBellNotification = false

@@ -37,7 +37,6 @@
     "exploreOrca": "Explorar Orca",
     "gettingStarted": "Empezando con Orca",
     "reportCrash": "Informar fallo...",
-    "exportPdf": "Exportar como PDF...",
     "file": "Archivo",
     "exit": "Salida",
     "edit": "Editar",
@@ -58,6 +57,13 @@
     "openWorktreePalette": "Abrir paleta de árbol de trabajo",
     "window": "Ventana",
     "help": "Ayuda"
+  },
+  "tray": {
+    "openOrca": "Abrir Orca",
+    "quit": "Salir",
+    "minimizeNotice": {
+      "body": "Orca sigue ejecutándose en la bandeja del sistema"
+    }
   },
   "worktreeJumpPalette": {
     "matchLabel": {
@@ -277,7 +283,8 @@
           "a5fc0cb622": "OpenClaude",
           "bf53f09bf8": "Claude Agent Teams",
           "0708ed89f1": "Claude",
-          "fc80296033": "Devin"
+          "fc80296033": "Devin",
+          "da41abbdd4": "Ante"
         },
         "skill": {
           "cli": {
@@ -495,6 +502,12 @@
             "unavailable": "Orca no puede verificar esta carpeta ahora mismo. Revisa el runtime o la conexión SSH e inténtalo de nuevo."
           }
         }
+      },
+      "projectSkillRuntime": {
+        "wslUnavailable": "Project runtime needs WSL before this skill can be installed.",
+        "distroRequired": "Select a WSL distro for this project before installing this skill.",
+        "distroMissing": "The selected WSL distro is unavailable. Choose an available distro or switch this project to Windows.",
+        "wslDefault": "WSL default"
       }
     },
     "hooks": {
@@ -517,10 +530,15 @@
       "useGlobalFileDrop": {
         "38c9f034ff": "No se pudieron cargar los archivos eliminados.",
         "d720e2f855": "Algunos archivos caídos no se pudieron cargar.",
-        "245faa95b9": "No hay ninguna ruta de espacio de trabajo remoto disponible para los archivos descartados."
+        "245faa95b9": "No hay ninguna ruta de espacio de trabajo remoto disponible para los archivos descartados.",
+        "nativeDropTooManyPathsDescription": "Drop {{value0}} or fewer files at a time.",
+        "nativeDropTooManyPaths": "Drop contains too many files.",
+        "nativeDropPathsTooLargeDescription": "Drop fewer files or use a shorter path list.",
+        "nativeDropPathsTooLarge": "Drop path list is too large."
       },
       "useIpcEvents": {
         "0e3cf53060": "Pestaña del navegador {{value0}} no encontrada",
+        "2f6637fe6c": "La pestaña del navegador {{value0}} está fijada",
         "a8d2bf8e9e": "No hay ninguna pestaña activa del navegador para cerrar",
         "291c8ed902": "Las pestañas del navegador no están disponibles mientras un tiempo de ejecución remoto está activo",
         "f45fa2b03c": "Los perfiles del navegador no están disponibles mientras un tiempo de ejecución remoto está activo",
@@ -595,6 +613,12 @@
         "f70ac54d38": "Cuentas de proveedores de IA",
         "4121f7a0a2": "Administre agents de IA, establezca un valor predeterminado y personalice comandos.",
         "b49abbd2f7": "Agents"
+      },
+      "useAppMenuPaste": {
+        "pasteTooLarge": "Paste is too large."
+      },
+      "useLargeTextControlPaste": {
+        "pasteTooLarge": "Paste is too large."
       }
     },
     "components": {
@@ -787,7 +811,8 @@
         "16c1abe76c": "Marcar visto",
         "ba8e329d92": "Desmarcar visto",
         "3f79ffc8b7": "Abra los detalles de relaciones públicas para ver los revisores actuales.",
-        "5c1c973855": "Eliminar revisor"
+        "5c1c973855": "Eliminar revisor",
+        "commentTooLarge": "Comment is too large to submit safely."
       },
       "GitLabItemDialog": {
         "65e784c1f1": "Reabrir",
@@ -851,7 +876,8 @@
         "40c56b95e2": "{{value0}} aprobación{{value1}} restante",
         "3a051b8ade": "Elemento de trabajo",
         "32f8bef818": "Sin salida de registro.",
-        "4168eb2c51": "Resolver"
+        "4168eb2c51": "Resolver",
+        "commentTooLarge": "Comment is too large to submit safely."
       },
       "JiraIssueWorkspace": {
         "b0b92666c9": "Comentario",
@@ -885,7 +911,8 @@
         "54649eaeab": "+ Cesionario",
         "2a829a2f00": "prioridad",
         "693be070d0": "transición",
-        "ef21405c6d": "Problema con Jira"
+        "ef21405c6d": "Problema con Jira",
+        "commentTooLarge": "Comment is too large to submit safely."
       },
       "Landing": {
         "76a95f7f47": "Crear",
@@ -906,7 +933,8 @@
         "16e9e3df89": "con estrella",
         "0d0ace8861": "Dar estrella en GitHub",
         "ec43b38ba7": "Con estrella en GitHub",
-        "157bb5ecbb": "Abrir GitHub"
+        "157bb5ecbb": "Abrir GitHub",
+        "preflightDismiss": "Dismiss"
       },
       "LinearIssueMarkdownDescriptionEditor": {
         "d9c47069ef": "Markdown",
@@ -1006,7 +1034,8 @@
         "858d0630da": "Cerrar vista previa",
         "39883467f4": "Cuestión Linear",
         "fda549766e": "{{value0}} para comentar",
-        "d71cd3003e": "+ Cesionario"
+        "d71cd3003e": "+ Cesionario",
+        "commentTooLarge": "Comment is too large to submit safely."
       },
       "NewWorkspaceComposerCard": {
         "cbb47ee0dc": "Solo disponible para proyectos Git locales.",
@@ -1061,7 +1090,10 @@
         "setupKindFolder": "Folder",
         "setupHostExistingFolderHelp": "Link a checkout that already exists there, then create this workspace on that host.",
         "importingHostSetup": "Importing...",
-        "importHostSetup": "Import"
+        "importHostSetup": "Import",
+        "notePasteTooLarge": "Paste is too large for the note field.",
+        "reuseExistingBranch": "Reuse branch",
+        "reuseExistingBranchHint": "Check out the existing branch instead of creating a new one from it."
       },
       "NewWorkspaceComposerModal": {
         "fa90f739a5": "Elija el proyecto, el nombre del espacio de trabajo y el agente antes de crear el espacio de trabajo."
@@ -1230,7 +1262,8 @@
         "50b8fb290f": "Marcar visto",
         "2b4fdb880c": "Desmarcar visto",
         "56ec6eafb7": "Abra los detalles de relaciones públicas para ver los revisores actuales.",
-        "7f964a365a": "Eliminar revisor"
+        "7f964a365a": "Eliminar revisor",
+        "commentTooLarge": "Comment is too large to submit safely."
       },
       "QuickOpen": {
         "1dbd3f59ff": "Mover",
@@ -1642,7 +1675,7 @@
         "1628fd7dfa": "No hay árboles de trabajo, configuraciones, acciones ni pestañas abiertas activas",
         "b781ae05e3": "Escriba para buscar árboles de trabajo, configuraciones, pestañas y acciones.",
         "f60f8730be": "No hay otros árboles de trabajo a los que cambiar",
-        "c4afa68159": "Pruebe con un árbol de trabajo, configuración, acción, título de página, emulador, URL, PR o puerto.",
+        "c4afa68159": "Pruebe con un árbol de trabajo, ajuste, acción, título de pestaña, prompt de agente, URL, PR o puerto.",
         "dbd9d87eec": "Ningún resultado coincide con tu búsqueda",
         "2c38630a01": "El espacio de trabajo ya no existe",
         "7726ce9970": "La pestaña del emulador móvil ya no existe",
@@ -1659,7 +1692,8 @@
         "recentWorktreesHeader": "Árboles de trabajo recientes",
         "settingsBadge": "Ajustes",
         "actionBadge": "Acción",
-        "paletteHostBadge": "Host: {{value0}}"
+        "paletteHostBadge": "Host: {{value0}}",
+        "workspaceTabMissing": "La pestaña ya no existe"
       },
       "github": {
         "pr": {
@@ -1818,7 +1852,8 @@
                 "c3e829b4d9": "Ahorrar",
                 "463d030ae4": "Borrar",
                 "8564f58542": "Editar",
-                "5f104bf855": "Aún no hay comentarios."
+                "5f104bf855": "Aún no hay comentarios.",
+                "commentTooLarge": "Comment is too large to submit safely."
               },
               "LabelsEditor": {
                 "34dd57d6c8": "Cargando…",
@@ -1846,7 +1881,8 @@
           "b7e4a1c902": "Paste, drop, or click to add files",
           "8f1c2d4e6a": "Nothing to preview",
           "c91f0a2b14": "Write",
-          "d82b1e3f05": "Preview"
+          "d82b1e3f05": "Preview",
+          "imageUrlTooLarge": "Image URL is too large."
         },
         "IssueSourceSelector": {
           "d6aeb2012b": "Mostrando problemas de",
@@ -1936,7 +1972,8 @@
           "f6a7b8c9d0": "Close issue",
           "b1c2d3e4f5": "Reopen issue",
           "0a73f59e85": "Send comment",
-          "bf43425540": "Comment"
+          "bf43425540": "Comment",
+          "commentTooLarge": "Comment is too large to submit safely."
         },
         "GitHubWorkItemAssigneePopoverContent": {
           "cddd9b04a7": "Loading assignees",
@@ -2241,11 +2278,18 @@
           },
           "MobileDriverOverlay": {
             "c6460cf584": "Devolver",
-            "c44659e09f": "conducción móvil",
+            "c8f2e1a4b9": "Recuperar este terminal",
+            "c44659e09f": "Teléfono al mando",
             "7cffad954c": "Colapsar",
             "3eed73394f": "Tu teclado está en pausa",
-            "faa367dc74": "Este terminal tiene el tamaño adecuado para tu aplicación móvil",
-            "54f7d6f69d": "Cambiar tamaño de todas las terminales"
+            "faa367dc74": "Tu teléfono dejó esto en tamaño móvil",
+            "54f7d6f69d": "Recuperar todos los terminales",
+            "b3d8e1f42a": "Restaurar este terminal",
+            "e8c4f2a91b": "Restaurar todos los terminales",
+            "f2a8b9c1d3": "Desde tu teléfono",
+            "c7e4a2b8f1": "Tu teléfono está al mando",
+            "d9f3c6e2a4": "El teclado del escritorio está en pausa. Recupera este terminal para escribir aquí, recupera todos los terminales que controla tu teléfono, o colapsa para seguir mirando.",
+            "a6b1d8f3e2": "La sesión del teléfono terminó. Restaura el tamaño de escritorio para este terminal o para todos los terminales que tu teléfono dejó en tamaño móvil."
           },
           "TerminalAgentSessionForkDialog": {
             "17fc841e59": "Copiar contexto",
@@ -2259,6 +2303,7 @@
           "TerminalContextMenu": {
             "b4cdd9314e": "Borrar pantalla",
             "8c17d6786d": "Cerrar panel",
+            "copyTerminalId": "Copiar ID de terminal",
             "2cf85a6a55": "Copiar ID del panel",
             "39809d152f": "Establecer título…",
             "06c2b0f043": "Igualar tamaños de paneles",
@@ -2273,7 +2318,8 @@
             "f3eeb1de13": "Copiar",
             "c2f0b72b8d": "Insertar",
             "925f49f210": "Expandir panel",
-            "df766809e0": "Contraer panel"
+            "df766809e0": "Contraer panel",
+            "copyTerminalId": "Copy Terminal ID"
           },
           "TerminalErrorToast": {
             "e4aa243f8c": "Reiniciar demonio",
@@ -2333,7 +2379,12 @@
                 "53f015fd85": "Se omitió el enlace simbólico {{value0}}{{value1}}.",
                 "29c031b49a": "Subiendo el archivo {{value0}}{{value1}} al tiempo de ejecución...",
                 "0c77693641": "Worktree no está listo; inténtalo de nuevo en un momento.",
-                "ce8248b835": "Ruta del árbol de trabajo no disponible."
+                "ce8248b835": "Ruta del árbol de trabajo no disponible.",
+                "internalTooManyPaths": "Drop contains too many paths for a safe terminal paste.",
+                "internalPathsTooLarge": "Drop path list is too large for a safe terminal paste.",
+                "b4cf68e889": "Skipped {{value0}} {{value1}}.",
+                "writeTimeout": "File drop cancelled: terminal did not accept the path before the safety timeout.",
+                "writeRejected": "File drop cancelled: terminal could not accept the path."
               }
             }
           },
@@ -2342,11 +2393,26 @@
               "pane": {
                 "context": {
                   "menu": {
-                    "a29b9faa01": "ID del panel copiado"
+                    "a29b9faa01": "ID del panel copiado",
+                    "terminal": {
+                      "id": {
+                        "copied": "ID de terminal copiado",
+                        "copy": {
+                          "failed": "No se pudo copiar el ID de terminal"
+                        }
+                      }
+                    }
                   }
                 }
               }
             }
+          },
+          "PinnedTabCloseDialog": {
+            "6c190f295a": "¿Cerrar pestaña fijada?",
+            "0d1963f4a6": "Esta pestaña está fijada. ¿Seguro que quieres cerrarla?",
+            "dont_ask_again": "No volver a preguntar por pestañas fijadas",
+            "0b38ee2f86": "Cancelar",
+            "c337c9d75c": "Cerrar"
           }
         }
       },
@@ -2501,7 +2567,8 @@
                   "097a982ee0": "Cargando archivos...",
                   "5a9c83c04b": "Abra cualquier archivo, URL, agente, ...",
                   "90eb94dc48": "Introduzca una URL http:// o https://.",
-                  "5553b283ce": "Ingrese una URL o ruta de archivo."
+                  "5553b283ce": "Ingrese una URL o ruta de archivo.",
+                  "queryTooLarge": "Search text is too large."
                 }
               },
               "menu": {
@@ -2642,13 +2709,11 @@
             "runtime_checking": "Checking",
             "runtime_online": "Connected",
             "runtime_unavailable": "Disconnected",
-            "runtime_available": "Available",
             "runtime_connect_unavailable": "Remote host is not reachable",
             "runtime_disconnect_failed": "Disconnect failed",
             "runtime_reconnecting": "Reconnecting",
             "runtime_last_close_reason": "Closed: {{value0}}",
-            "runtime_reconnect_attempt": "Attempt {{value0}}",
-            "runtime_channel_counts": "{{value0}} pending · {{value1}} streams"
+            "runtime_reconnect_attempt": "Attempt {{value0}}"
           },
           "StatusBar": {
             "9659e38343": "Puertos",
@@ -2691,7 +2756,15 @@
             "cd9d7b40ff": "Reiniciar {{value0}} sesiones",
             "6cd6650b4c": "Reiniciar sesión",
             "1446d0d8a0": "{{value0}} Las sesiones del Codex todavía están en la cuenta anterior.",
-            "605901a495": "1 sesión del Codex todavía está en la cuenta anterior"
+            "605901a495": "1 sesión del Codex todavía está en la cuenta anterior",
+            "5e5f9f5160": "1 rate-limit reset available",
+            "5ecae9197c": "{{value0}} rate-limit resets available",
+            "25d8bbde69": "Using reset…",
+            "e159fc1fd7": "Reset now",
+            "972a1ff497": "Reset Codex limits?",
+            "6d1042aa6f": "This uses one Codex rate-limit reset credit for the active account and resets any eligible usage windows immediately.",
+            "f077f586db": "Don't ask again",
+            "c0e972d726": "Cancel"
           },
           "StatusBarUsageEmptyCta": {
             "828c764a79": "Conectar una cuenta",
@@ -2833,7 +2906,9 @@
             "a9a318b7a3": "Error al actualizar: se muestran datos almacenados en caché",
             "7ad719c4bf": "Limitado",
             "e740f92596": "Error al actualizar",
-            "8418ec448d": "No se pudo actualizar el uso de {{value0}}. Es posible que las sesiones de agente sigan iniciadas."
+            "8418ec448d": "No se pudo actualizar el uso de {{value0}}. Es posible que las sesiones de agente sigan iniciadas.",
+            "45198c7d95": "1 rate-limit reset available",
+            "bce421cba3": "{{value0}} rate-limit resets available"
           },
           "SshTargetStatusRow": {
             "sshHost": "SSH Host"
@@ -3213,9 +3288,7 @@
         "AddRepoCreateStep": {
           "0ae45b8238": "mi-proyecto",
           "a8149a3a5a": "Nombre",
-          "038729c107": "Carpeta",
           "11fd2a7db8": "Repositorio Git",
-          "180e9b5e48": "Tipo de proyecto",
           "5e97f0c4b9": "Proyecto creado",
           "2c12db1511": "Proyecto ya agregado",
           "875dda0995": "Introduzca una ruta principal del servidor.",
@@ -3225,7 +3298,7 @@
           "b100311784": "Ponle un nombre y Orca creará un proyecto real con valores predeterminados sensatos.",
           "685b5eefe1": "{{kind}} en {{parent}}",
           "2a762f3b19": "Comprobando Git en este host...",
-          "fe1e616c5b": "Git no está instalado, así que una carpeta simple será el valor predeterminado.",
+          "fe1e616c5b": "Git es necesario para crear un proyecto.",
           "c234df77f7": "Elige o introduce una carpeta principal del servidor antes de crear.",
           "3a13f6e88b": "ubicación no seleccionada",
           "6ed14c0281": "carpeta del servidor no seleccionada",
@@ -3430,7 +3503,8 @@
           "f8b1deb1a4": "Cancelar",
           "51001182e3": "directorio vacio",
           "971d85cc84": "Se abre como proyecto remoto · {{value0}}",
-          "00c4235c10": "No hay coincidencias para '{{value0}}'"
+          "00c4235c10": "No hay coincidencias para '{{value0}}'",
+          "largeInputNoMatches": "No matches for this long input"
         },
         "RemoveFolderDialog": {
           "4dc5b5065b": "Eliminar",
@@ -3508,7 +3582,8 @@
           "f506a1262a": "Filtrar espacios de trabajo",
           "75405270ed": "Editar filtros ({{value0}} activo)",
           "489d1c8c9f": "Buscar proyectos...",
-          "ee240a39eb": "Editar filtros"
+          "ee240a39eb": "Editar filtros",
+          "automationCreated": "Ocultar creados por automatizaciones"
         },
         "SidebarHeader": {
           "92154beb7e": "Nuevo espacio de trabajo",
@@ -3570,13 +3645,17 @@
         "SidebarWorkspaceFilterSection": {
           "c3fa13dc2e": "Ocultar rama predeterminada",
           "ed1611b65b": "Ocultar durmiendo",
-          "82594419ba": "Filtros"
+          "82594419ba": "Filtros",
+          "automationCreated": "Ocultar creados por automatizaciones"
         },
         "SidebarWorkspaceOptionsMenu": {
           "95c9754653": "Diseño de actividad del Agent",
           "3d4b9c4997": "Flotar",
           "ba87080fb7": "Mostrar propiedades",
           "320b675c9a": "Diseño de tarjeta",
+          "newCardDisplay": {
+            "title": "Visualización de tarjeta"
+          },
           "09faabd875": "Orden del proyecto",
           "7bada3b1ab": "Ordenar por",
           "dc0bb670bc": "Agrupar por",
@@ -3599,6 +3678,8 @@
           "b8dcc6f321": "Enlace PR/MR",
           "ca4d3c522e": "Cuestión Linear",
           "91dfc653e8": "billete de GitHub",
+          "bdd23b4e07": "Issues de GitHub",
+          "44713a5d04": "Issues de Linear",
           "cc17bd443b": "Detallado",
           "0f9b959b31": "relaciones públicas",
           "e029a2d775": "Estado",
@@ -3611,7 +3692,15 @@
           "projectSshHost": "Project SSH",
           "activeRuntimeHost": "Active server",
           "projectRuntimeHost": "Project server",
-          "631b97eea9": "Host scope"
+          "631b97eea9": "Host scope",
+          "2d4f0eb933": "Predeterminado",
+          "1a0eec0d35": "Estado",
+          "b5536d5a88": "Tareas",
+          "8d62c68b35": "Notas",
+          "automation": "Automation",
+          "2d74665a56": "Puertos",
+          "65a9820bd1": "Estados del agente",
+          "219ebf1961": "Nombre de rama"
         },
         "SshDisconnectedDialog": {
           "ca4a7892af": "Conectando...",
@@ -3650,7 +3739,9 @@
           "8ce44af9a8": "Cambiar nombre {{value0}}",
           "395e541d5d": "Estados",
           "34f03eb0de": "Configuración del tablero",
-          "26cbc92150": "Configuración del tablero del espacio de trabajo"
+          "26cbc92150": "Configuración del tablero del espacio de trabajo",
+          "87d24a0c2f": "Sincronizar el estado del tablero y de incidencias",
+          "4c2eaa78cc": "Al mover un espacio de trabajo vinculado, se actualiza el estado de su incidencia de Linear cuando existe un estado de flujo de trabajo coincidente."
         },
         "WorkspaceKanbanStatusLane": {
           "8ad104642b": "Vacío",
@@ -3670,8 +3761,6 @@
           "0f33af979b": "Pago parcial. Los archivos fuera de estas rutas no están en el disco.",
           "4f964d5e8c": "escaso",
           "7d517f82e2": "primario",
-          "c6833b5187": "Se cambiará el nombre del mensaje del primer agente.",
-          "f62a3dadbc": "cambiar nombre pendiente",
           "4eba2ea99e": "Falló el nombre automático. Haga clic para ver detalles.",
           "74522ee457": "cambiar el nombre falló",
           "02e19349f4": "Error al cambiar el nombre automáticamente: ver error",
@@ -3684,7 +3773,10 @@
           "93aebe4529": "Carpeta",
           "0d224eff10": "árbol de trabajo primario",
           "ca74db7550": "Proyecto remoto vía SSH",
-          "021538e1d1": "SSH desconectado"
+          "021538e1d1": "SSH desconectado",
+          "runtimeHostDisconnected": "Server disconnected",
+          "runtimeHostProject": "Project on Orca server",
+          "automationCreated": "Created by automation"
         },
         "WorktreeCardAgents": {
           "1b0a156717": "Agents"
@@ -3709,7 +3801,15 @@
           "3ea2702e62": "Vinculado {{value0}} #{{value1}}",
           "b105fd3057": "Linear vinculado {{value0}}",
           "3f2649eeb8": "Problema vinculado #{{value0}}",
-          "fe075cb851": "Notas del espacio de trabajo"
+          "fe075cb851": "Notas del espacio de trabajo",
+          "automationHeader": "Automatización",
+          "openAutomation": "Abrir automatización",
+          "openAutomationRun": "Abrir ejecución",
+          "automationCreated": "Creado por automatización",
+          "checkingAutomationAvailability": "Comprobando disponibilidad de la automatización...",
+          "automationMissing": "La automatización ya no está disponible.",
+          "automationRunMissing": "El historial de ejecuciones ya no está disponible.",
+          "automationAvailabilityUnavailable": "No se pudo comprobar la disponibilidad de la automatización."
         },
         "WorktreeCardMetadataStatusBadges": {
           "fe188062a1": "Estado: Abierto",
@@ -3738,7 +3838,7 @@
           "e091caab15": "No se pudo encontrar el proyecto.",
           "439fa94d53": "Actualizar",
           "579b1a8e61": "Quitar del padre",
-          "8d9cd19d09": "Abrir espacio de trabajo principal",
+          "8d9cd19d09": "Abrir árbol de trabajo padre",
           "d35dfeae58": "Quitar del grupo",
           "76865d827f": "Mover al grupo",
           "503ec0f8e6": "Nuevo grupo del proyecto",
@@ -3754,7 +3854,9 @@
           "8dacff1fe0": "Marcar como leído",
           "3baa7d6507": "Alfiler",
           "697d0f6e1b": "Desprender",
-          "250de158fd": "Remove Workspace"
+          "250de158fd": "Remove Workspace",
+          "changeParentWorkspace": "Cambiar árbol de trabajo padre...",
+          "setParentWorkspace": "Establecer árbol de trabajo padre..."
         },
         "WorktreeList": {
           "d880ea0744": "Crea un grupo y mueve este proyecto a él.",
@@ -3795,7 +3897,8 @@
           "groupDeleteFailedDesc": "Something went wrong while deleting the group. No projects were removed.",
           "7a8b9c0d1e": "Update required",
           "hostAuthNeeded": "Authentication needed",
-          "hostDisconnected": "Disconnected"
+          "hostDisconnected": "Disconnected",
+          "failedNestWorkspace": "No se pudo anidar el espacio de trabajo"
         },
         "WorktreeMetaDialog": {
           "3db0a2a593": "Cancelar",
@@ -4105,6 +4208,25 @@
           "2d3e4f5a6b": "Check connection",
           "3c4d5e6f7a": "Manage host…",
           "6e7f8a9b0c": "Remove host…"
+        },
+        "WorkspaceKanbanDrawer": {
+          "1975a4e480": "Error al sincronizar el estado de la tarea",
+          "e02b0d92ff": "Sincronización del estado de la tarea omitida",
+          "c1d2e3f4a5": "No se pudo leer la incidencia {{value0}} de Linear.",
+          "d2e3f4a5b6": "No hay ningún estado de flujo de trabajo de Linear que coincida con {{value0}}.",
+          "e3f4a5b6c7": "Varios estados de flujo de trabajo de Linear coinciden con {{value0}}.",
+          "f4a5b6c7d8": "No se pudo actualizar la incidencia {{value0}} de Linear.",
+          "a5b6c7d8e9": "No se pudo sincronizar la incidencia {{value0}} de Linear.",
+          "b6c7d8e9f0": "No se pudo completar la sincronización del estado de la tarea.",
+          "c7d8e9f0a1": "{{value0}} actualizadas",
+          "d8e9f0a1b2": "{{value0}} omitidas",
+          "e9f0a1b2c3": "{{value0}} fallidas"
+        },
+        "WorktreeParentPickerPopover": {
+          "failedSetParent": "No se pudo establecer el árbol de trabajo padre",
+          "current": "Actual",
+          "searchPlaceholder": "Buscar árboles de trabajo...",
+          "empty": "No hay árboles de trabajo elegibles que coincidan."
         }
       },
       "shared": {
@@ -4242,7 +4364,9 @@
           "6627e75c92": "Explicar la compatibilidad HTTP/1.1",
           "e9506d3377": "Compatibilidad HTTP/1.1",
           "8b7a8df299": "Soluciones alternativas de bajo nivel para la resolución de problemas de soporte.",
-          "8d8d8ac599": "Compatibilidad"
+          "8d8d8ac599": "Compatibilidad",
+          "network": "Red",
+          "networkDescription": "Enrutamiento de red a nivel de aplicación para proxies y entornos corporativos."
         },
         "AgentLocationSetting": {
           "92f4238f1a": "WSL predeterminado",
@@ -4254,15 +4378,19 @@
           "f97b986b7f": "wsl"
         },
         "AgentSkillSetupPanel": {
-          "0b810ec59f": "Presione Entrar para ejecutar el comando de instalación.",
+          "0b810ec59f": "Press Enter to run the command.",
           "ed197f59a2": "comando copiar",
-          "817d3f9f18": "Copiar comando de instalación",
+          "817d3f9f18": "Copy command",
           "5289300939": "No instalado",
           "9fcebceb2a": "Instalado",
           "68a468752e": "De cheques...",
           "c689392435": "Vuelva a comprobar",
-          "a31e2aa302": "No se pudo copiar el comando de instalación.",
-          "378ad26865": "Comando de instalación copiado."
+          "a31e2aa302": "Failed to copy command.",
+          "378ad26865": "Copied command.",
+          "copiedCommand": "Copied command.",
+          "failedToCopyCommand": "Failed to copy command.",
+          "copyCommandAria": "Copy command",
+          "runCommandDescription": "Press Enter to run the command."
         },
         "AgentsPane": {
           "d83834f5e6": "Detectando agents instalados…",
@@ -4303,7 +4431,8 @@
           "agentPermissionsTooltip": "Custom agent arguments stay unchanged when switching modes.",
           "agentPermissionsDescription": "Choose whether Orca launches agents with fewer permission prompts or with manual checks.",
           "agentPermissionsYolo": "Yolo",
-          "agentPermissionsManual": "Manual"
+          "agentPermissionsManual": "Manual",
+          "3f1bdf3cb4": "Environment text is too large to parse safely."
         },
         "AppIconSelector": {
           "d5a112dc9b": "Icono siguiente",
@@ -4354,7 +4483,10 @@
             "tintOpacity": "Intensidad del tinte",
             "tintOpacityDescription": "Controla con qué fuerza se mezcla el tinte en la barra lateral."
           },
-          "workspaceCardLayoutGuidance": "Usa el menú de opciones de la barra lateral de espacios de trabajo > Diseño de tarjeta > Compacto."
+          "workspaceCardLayoutGuidance": "Usa el menú de opciones de la barra lateral de espacios de trabajo > Diseño de tarjeta > Compacto.",
+          "872af9556e": "Bandeja del sistema",
+          "2edf606c46": "Minimizar a la bandeja al cerrar",
+          "b707773a0d": "Cuando está activado, cerrar la ventana mantiene Orca en ejecución en la bandeja del sistema en lugar de salir."
         },
         "AutoRenameBranchFromWorkSetting": {
           "1626524572": "Nautilus",
@@ -4653,9 +4785,9 @@
           "dac08ec03e": "Laboral..."
         },
         "ExperimentalPane": {
-          "9762364929": "Permite enlaces simbólicos automáticos de ciertas carpetas o archivos que deben conectarse a los árboles de trabajo creados.",
-          "24416f42cd": "Enlaces simbólicos en árboles de trabajo",
-          "fb82ea1d7a": "Vincula automáticamente archivos o carpetas configurados en árboles de trabajo recién creados.",
+          "9762364929": "Usa APFS clone-copy en macOS cuando es posible; de lo contrario, crea enlaces simbólicos de las carpetas o archivos configurados en los árboles de trabajo creados.",
+          "24416f42cd": "Rutas compartidas en árboles de trabajo",
+          "fb82ea1d7a": "Materializa automáticamente archivos o carpetas configurados en árboles de trabajo recién creados.",
           "a20d5ea365": "Mantiene visible un resaltado a nivel de panel después de que suena la terminal o los eventos de finalización del agente hasta que interactúa con ese panel. Experimental mientras sintonizamos la señal.",
           "ec897e8d89": "Atención terminal",
           "88b7613afb": "Resaltado de panel persistente para eventos de finalización de agente y timbre de terminal.",
@@ -4668,11 +4800,17 @@
           "agentHibernation": {
             "copy": "Detiene los terminales de agentes en segundo plano que estén inactivos después del intervalo configurado y reanuda las sesiones compatibles cuando las vuelves a abrir. Experimental mientras ajustamos el modelo de seguridad.",
             "description": "Detiene los terminales de agentes en segundo plano que estén inactivos después del intervalo configurado y reanuda las sesiones compatibles cuando las vuelves a abrir.",
-            "idleMinutesDescription": "Cuántos minutos inactivo debe esperar un agente en segundo plano completado antes de que Orca pueda hibernarlo.",
-            "idleMinutesLabel": "Hibernar después de",
+            "idleMinutesDescription": "Cuántos minutos inactivo debe esperar un agente en segundo plano completado antes de que Orca pueda suspenderlo.",
+            "idleMinutesLabel": "Suspender después de",
             "idleMinutesSuffix": "minutos",
-            "title": "Hibernación de agentes",
-            "toggleLabel": "Alternar hibernación de agentes"
+            "title": "Suspensión de agentes",
+            "toggleLabel": "Alternar suspensión de agentes"
+          },
+          "newWorktreeCardStyle": {
+            "copy": "Previsualiza el diseño actualizado de tarjetas de worktree, la ubicación de metadatos, las opciones del menú de visualización de tarjeta y la presentación de estado.",
+            "description": "Previsualiza el diseño actualizado de tarjetas de worktree, la ubicación de metadatos, las opciones del menú de visualización de tarjeta y la presentación de estado.",
+            "title": "Nuevo estilo de tarjeta",
+            "toggleLabel": "Alternar nuevo estilo de tarjeta"
           }
         },
         "FloatingWorkspacePane": {
@@ -4688,7 +4826,7 @@
           "37df688d6f": "Habilite el espacio de trabajo flotante y elija dónde comienzan las nuevas pestañas.",
           "1f67f39384": "Espacio de trabajo flotante"
         },
-        "GeneralCacheTimerSection": {
+        "AgentCacheTimerSection": {
           "05de84a104": "1 hora",
           "54395ecd7c": "5 minutos",
           "8b9e202e0a": "Haga coincidir esto con el TTL de caché de su proveedor. El valor predeterminado es 5 minutos.",
@@ -4724,7 +4862,7 @@
           "d21136d9ef": "Configure cómo Orca persiste en las ediciones de archivos.",
           "45c6e85c4d": "Editor"
         },
-        "GeneralNetworkSettingsSection": {
+        "AdvancedNetworkSettingsSection": {
           "3e431564b5": "host local, 127.0.0.1, *.interno",
           "33ee3ca3af": "Opcional. Separe los hosts con comas, punto y coma o líneas nuevas.",
           "f6d76cc8f4": "Reglas de omisión de proxy",
@@ -4735,10 +4873,15 @@
           "f00daf6324": "Proxy HTTP",
           "823e0f15b1": "URL proxy para solicitudes de red Orca y terminales secundarios locales.",
           "d93c7cd531": "Configure el enrutamiento de red a nivel de aplicación.",
-          "c46cdbbd4e": "Red"
+          "c46cdbbd4e": "Red",
+          "configureProxy": "Configurar proxy"
         },
         "GeneralPane": {
-          "d58fccfd84": "Navegación"
+          "d58fccfd84": "Navegación",
+          "5cb5475664": "Confirmar antes de cerrar pestañas fijadas",
+          "36b2a5dc6d": "Muestra un diálogo de confirmación antes de cerrar una pestaña fijada.",
+          "projectRuntime": "Project Runtime",
+          "projectRuntimeDescription": "Default runtime for local Windows projects that do not override it."
         },
         "GeneralSupportSection": {
           "af7d9f4396": "¡Gracias por el apoyo!",
@@ -5066,7 +5209,7 @@
         },
         "MobilePane": {
           "dd3cd78d04": "Escanear con Orca Móvil",
-          "35100bca5d": "Mientras usas un terminal en tu teléfono, Orca lo reduce para que se ajuste a la pantalla de tu teléfono. Cuando cierra la aplicación o la abandona, esto controla si permanece en el tamaño del teléfono (para que las herramientas CLI interactivas no vuelvan a fluir) o cambia de tamaño a su escritorio. Siempre puedes hacer clic en Restaurar en el banner del terminal para cambiar su tamaño manualmente.",
+          "35100bca5d": "Mientras usas un terminal en tu teléfono, Orca lo reduce para que se ajuste a la pantalla de tu teléfono. Cuando cierra la aplicación o la abandona, esto controla si permanece en el tamaño del teléfono (para que las herramientas CLI interactivas no vuelvan a fluir) o cambia de tamaño a su escritorio. Siempre puedes usar Restaurar este terminal o Restaurar todos los terminales en el banner para cambiar el tamaño manualmente.",
           "ee56f1c7e4": "Cuando sales de la aplicación móvil",
           "3939fd062c": "Revocar un dispositivo lo desconecta inmediatamente.",
           "254a6d09e4": "emparejado",
@@ -5198,34 +5341,28 @@
           "239bf9132b": "Comando de instalación copiado."
         },
         "PrivacyDiagnosticBundleControls": {
-          "dc8404a930": "Crear vista previa",
+          "dc8404a930": "Crear archivo de diagnóstico",
           "a5acaffdb6": "Desechar",
-          "aca2c8a367": "Subir",
-          "798b6f0be5": "Abrir vista previa",
+          "aca2c8a367": "Enviar a soporte",
+          "798b6f0be5": "Abrir archivo para revisar",
           "2ae9a6b63e": "Hecho",
-          "7f14a1733c": "Eliminar paquete",
-          "2801d4ce22": "Copiar billete"
+          "7f14a1733c": "Eliminar archivo enviado",
+          "2801d4ce22": "Copiar ID de referencia",
+          "d8be621237": "Abre primero el archivo para revisar.",
+          "61676df223": "Diagnósticos enviados. Comparte este ID de referencia con soporte: {{value0}}.",
+          "fd7b3891af": "Abriste el archivo para revisar ({{value0}}). Envía ese archivo a soporte o descártalo.",
+          "62340d4439": "Tu archivo para revisar está listo ({{value0}}). Ábrelo para ver qué se enviaría y luego elige si quieres enviarlo a soporte.",
+          "19ec5e29b3": "Recopila actividad reciente y errores de la app en un archivo redactado que puedes revisar antes de enviarlo. Nada se sube hasta que elijas enviarlo."
         },
         "PrivacyDiagnosticsSection": {
-          "acc7c66e6e": "exportación OTLP",
-          "4ff08ff3a7": "Borrar rastros locales",
-          "9ca08a9f8f": "Elimina todos los archivos de seguimiento rotados en esta máquina.",
-          "fe81a52cb2": "Abrir carpeta de seguimiento",
-          "5ff57fc986": "Revela {{value0}} en su administrador de archivos.",
-          "af2fc82cde": "Paquete de diagnóstico",
-          "c18cbe45df": "Paquete de diagnóstico cargado eliminado",
-          "7a4944595b": "No se pudo copiar el ticket de diagnóstico",
-          "13eb2c65a1": "Ticket de diagnóstico copiado",
-          "860bca9ec9": "Vista previa del paquete de diagnóstico descartada",
-          "49fc6c80e8": "Paquete de diagnóstico subido",
-          "db3228e01a": "Vista previa del paquete de diagnóstico abierta",
-          "a2b3505c77": "Vista previa del paquete de diagnóstico creada",
-          "9666a05580": "No se pudieron borrar los archivos de seguimiento",
-          "32d767f84d": "Archivos de seguimiento locales borrados",
-          "b85fe972cd": "No se pudo abrir la carpeta de seguimiento",
-          "1fb00a8995": "Desactivado",
-          "46ea3fb2d0": "Activado",
-          "7c9d9820b6": "Configure ORCA_OTLP_TRACES_URL para que Orca apunte a su propio recopilador OpenTelemetry."
+          "af2fc82cde": "Enviar diagnósticos de la app a soporte",
+          "c18cbe45df": "Diagnósticos enviados eliminados",
+          "7a4944595b": "No se pudo copiar el ID de referencia",
+          "13eb2c65a1": "ID de referencia copiado",
+          "860bca9ec9": "Archivo para revisar descartado",
+          "49fc6c80e8": "Diagnósticos enviados",
+          "db3228e01a": "Archivo para revisar abierto",
+          "a2b3505c77": "Archivo para revisar creado"
         },
         "PrivacyPane": {
           "36e0e2e63b": "variable de entorno. Desconfigúrelo y reinicie para volver a habilitarlo.",
@@ -5436,7 +5573,9 @@
           "addPlannedHostHelp": "Remember this host and finish adding the project later.",
           "existingFolder": "Existing folder",
           "addPlannedHostToHost": "Add {{host}}",
-          "addPlannedHostConfirm": "This only records that the project should be available on this host. You can add the folder or clone later."
+          "addPlannedHostConfirm": "This only records that the project should be available on this host. You can add the folder or clone later.",
+          "projectRuntime": "Project Runtime",
+          "projectRuntimeDescription": "Choose whether this project runs on Windows or WSL."
         },
         "RepositorySourceControlAiActionRows": {
           "548a6e1281": "Plantilla de comando",
@@ -5700,18 +5839,6 @@
           "82db1b7de4": "Lista de verificación de incorporación, {{value0}} de {{value1}} realizada. Mostrar guía de configuración.",
           "df38d612b7": "Aún no se han agregado proyectos.",
           "3e483e256b": "No hay configuraciones de proyecto coincidentes."
-        },
-        "ShortcutBindingRow": {
-          "4a4c2c9d32": "Agregar acceso directo",
-          "87381fd8f8": "Presione las teclas…",
-          "9cdaaa3d8f": "Deshabilitar acceso directo",
-          "3b62c142fa": "Deshabilitar {{value0}}",
-          "f75335b155": "Restablecer los valores predeterminados",
-          "4f2c9b2a05": "Restablecer {{value0}} a los valores predeterminados",
-          "97dccee14e": "Modificado",
-          "3b11ef3a43": "{{value0}} atajo",
-          "f6579be67b": "Cambiar acceso directo",
-          "6a7848fdac": "Escuchando atajos"
         },
         "ShortcutFilterRail": {
           "28b63545bf": "Estado",
@@ -6175,20 +6302,21 @@
           "ad5d036ecc": "No se pudo solicitar permiso del micrófono. El dictado de voz no estaba habilitado.",
           "f9a9cf6928": "Se requiere permiso del micrófono antes de habilitar el dictado de voz.",
           "1eac933202": "Se abrió Privacidad y seguridad de macOS. Habilite el dictado nuevamente después de otorgar acceso.",
-          "cd9fe37556": "Permiso de micrófono concedido"
+          "cd9fe37556": "Permiso de micrófono concedido",
+          "6fa734ed95": "Delete {{value0}}"
         },
         "WorktreeSymlinksSection": {
           "1c1e35b219": "Quitar {{value0}}",
           "b814c618e2": "Caminos vinculados",
-          "31ebab5403": "No hay rutas de enlaces simbólicos configuradas para este repositorio.",
+          "31ebab5403": "No hay rutas compartidas configuradas para este repositorio.",
           "ea06227efa": "agregado",
           "b2429aeb31": "Agregar",
           "ab40b8a5f1": "Sin coincidencias. Sigue escribiendo para agregar una ruta personalizada.",
           "4cd2a4c077": "Escriba una ruta (por ejemplo, .env o node_modules)…",
           "241325302c": "Agregar ruta",
-          "7ff265071d": "Cuando se crea un nuevo árbol de trabajo, cada ruta enumerada aquí tendrá un enlace simbólico desde el pago principal.",
-          "4755f120b6": "Enlaces simbólicos del árbol de trabajo",
-          "b07ef5a8b6": "Rutas para vincular simbólicamente desde el pago principal a árboles de trabajo recién creados.",
+          "7ff265071d": "Cuando se crea un nuevo árbol de trabajo, cada ruta enumerada aquí se copia con APFS clone-copy en macOS cuando es posible; de lo contrario, se enlaza simbólicamente desde el checkout principal.",
+          "4755f120b6": "Rutas compartidas del árbol de trabajo",
+          "b07ef5a8b6": "Rutas para materializar desde el checkout principal en árboles de trabajo recién creados.",
           "d72ba8dc68": "{{value0}} caminos",
           "9ea912d811": "1 camino"
         },
@@ -6469,7 +6597,9 @@
               "cardLayout": "diseño de tarjeta",
               "workspaceOptions": "opciones de espacios de trabajo",
               "detailed": "detallado"
-            }
+            },
+            "9a115966d3": "Minimizar a la bandeja al cerrar",
+            "4d5b9427b5": "Cuando está activado, cerrar la ventana mantiene Orca en ejecución en la bandeja del sistema en lugar de salir."
           }
         },
         "auto": {
@@ -6700,8 +6830,8 @@
             "10b52f79c1": "árboles de trabajo",
             "d23ae13990": "árbol de trabajo",
             "0d24759f14": "experimental",
-            "603d29ed74": "Vincula automáticamente archivos o carpetas configurados en árboles de trabajo recién creados para que el estado compartido (envs, cachés, instalaciones) permanezca conectado.",
-            "78c2a8dc74": "Enlaces simbólicos en árboles de trabajo",
+            "603d29ed74": "Materializa automáticamente archivos o carpetas configurados en árboles de trabajo recién creados usando APFS clone-copy en macOS cuando es posible; de lo contrario, usa enlaces simbólicos.",
+            "78c2a8dc74": "Rutas compartidas en árboles de trabajo",
             "7b79081695": "no leído",
             "f10d307468": "terminación",
             "5f067ba0f9": "agent",
@@ -6734,11 +6864,21 @@
               "agent": "agente",
               "agents": "agentes",
               "description": "Detiene los terminales de agentes en segundo plano que estén inactivos después del intervalo configurado y reanuda las sesiones compatibles cuando se vuelven a abrir.",
-              "hibernate": "hibernar",
               "minutes": "minutos",
               "sleep": "suspender",
               "terminal": "terminal",
-              "title": "Hibernación de agentes"
+              "title": "Suspensión de agentes"
+            },
+            "newWorktreeCardStyle": {
+              "card": "tarjeta",
+              "cards": "tarjetas",
+              "description": "Previsualiza el diseño actualizado de tarjetas de worktree, la ubicación de metadatos, las opciones del menú de visualización de tarjeta y la presentación de estado.",
+              "menu": "menú",
+              "metadata": "metadatos",
+              "status": "estado",
+              "title": "Nuevo estilo de tarjeta",
+              "worktree": "worktree",
+              "worktrees": "worktrees"
             }
           }
         },
@@ -6898,7 +7038,11 @@
             "7887a2c262": "carpeta",
             "7baf524b04": "espacio de trabajo",
             "d0bc793689": "Directorio raíz donde se crean las carpetas del espacio de trabajo.",
-            "4c95d08fa2": "Directorio de espacio de trabajo"
+            "4c95d08fa2": "Directorio de espacio de trabajo",
+            "161a86a9da": "Confirmar antes de cerrar pestañas fijadas",
+            "8e593f04fc": "Muestra un diálogo de confirmación antes de cerrar una pestaña fijada.",
+            "defaultProjectRuntime": "Default Project Runtime",
+            "defaultProjectRuntimeDescription": "Choose the runtime inherited by local Windows projects."
           }
         },
         "git": {
@@ -7211,12 +7355,8 @@
             "f7a2d9f137": "Variables de entorno que deshabilitan la transmisión de telemetría.",
             "e058a3c98d": "Variables de entorno de telemetría",
             "1686c07fee": "apoyo",
-            "4a583f3a2f": "telemetría abierta",
-            "9ea93ce3d6": "otlp",
-            "685c68a81f": "registros",
-            "40de3c2f19": "rastro",
             "c0494ff48a": "diagnóstico",
-            "8b08f32366": "Archivos de seguimiento y controles de exportación OTLP.",
+            "8b08f32366": "Diagnósticos de la aplicación y controles para compartir con soporte.",
             "6d258d2ed6": "Diagnóstico",
             "ead1deded2": "compartir",
             "27a27b2f63": "optar por no participar",
@@ -7309,8 +7449,8 @@
             "f1c53f2820": "árbol de trabajo",
             "7e228fc439": "enlaces simbólicos",
             "c06adcf136": "enlace simbólico",
-            "ed885e589f": "Rutas para vincular simbólicamente desde el pago principal a árboles de trabajo recién creados.",
-            "01b3377ebc": "Enlaces simbólicos del árbol de trabajo",
+            "ed885e589f": "Rutas para materializar desde el checkout principal en árboles de trabajo recién creados.",
+            "01b3377ebc": "Rutas compartidas del árbol de trabajo",
             "fff8834983": "inmediato",
             "fa3131f223": "modelo",
             "130d76dc16": "rebautizar",
@@ -7367,7 +7507,12 @@
             "remote": "remote",
             "vm": "vm",
             "keepForkUpToDate": "Mantener el fork actualizado",
-            "keepForkUpToDateDescription": "Avanza este fork de forma segura desde upstream con fast-forward."
+            "keepForkUpToDateDescription": "Avanza este fork de forma segura desde upstream con fast-forward.",
+            "projectRuntime": "Project Runtime",
+            "projectRuntimeDescription": "Choose whether this project runs on Windows or WSL.",
+            "copy": "copy",
+            "clone": "clone",
+            "apfs": "apfs"
           }
         },
         "runtime": {
@@ -7906,11 +8051,12 @@
           "thisDevice": "This device"
         },
         "WorkspaceDirectorySetting": {
-          "1a2b3c4d5e": "Client default",
-          "2b3c4d5e6f": "Apply to",
-          "3c4d5e6f7a": "Overrides client default",
-          "4d5e6f7a8b": "Inherits the client default",
-          "5e6f7a8b9c": "Reset"
+          "1a2b3c4d5e": "Predeterminado del cliente",
+          "2b3c4d5e6f": "Aplicar a",
+          "3c4d5e6f7a": "Anula el valor predeterminado del cliente",
+          "4d5e6f7a8b": "Hereda el valor predeterminado del cliente",
+          "5e6f7a8b9c": "Restablecer",
+          "6f7a8b9cad": "Usa una ruta relativa (p. ej. .orca/worktrees) para una ubicación por proyecto, o una ruta absoluta para una carpeta compartida."
         },
         "ProviderHostScopeControl": {
           "scope_label": "{{value0}}: {{value1}}",
@@ -7963,6 +8109,77 @@
           "ask": "Preguntar",
           "safeAuto": "Seguro automático",
           "off": "Desactivado"
+        },
+        "DefaultWindowsProjectRuntimeSetting": {
+          "defaultRuntime": "Default project runtime",
+          "windows": "Windows",
+          "wsl": "WSL",
+          "selectDistro": "Select distro",
+          "windowsDescription": "Projects inherit Windows unless a project overrides it.",
+          "wslUnavailable": "WSL is not available. Projects that inherit WSL will need repair.",
+          "distroRequired": "Choose a WSL distro before projects can inherit WSL.",
+          "wslDescription": "Projects inherit {{value0}} via WSL unless a project overrides it."
+        },
+        "ProjectWindowsRuntimeSetting": {
+          "projectRuntime": "Project runtime",
+          "defaultRuntime": "Default ({{value0}})",
+          "windows": "Windows",
+          "wsl": "WSL",
+          "selectDistro": "Select distro",
+          "runtimeChangeHelp": "Runtime changes apply to new terminals, agent checks, and skill discovery for this project. Existing terminals keep their current runtime.",
+          "wslUnavailable": "WSL is not available. Switch this project to Windows or repair WSL.",
+          "distroMissing": "{{value0}} is not installed in WSL. Choose an installed distro or switch this project to Windows.",
+          "distroRequired": "Choose a WSL distro or switch this project to Windows.",
+          "inheritedWsl": "No project override. General settings select {{value0}} via WSL.",
+          "projectWsl": "This project runs in {{value0}} via WSL.",
+          "inheritedWindows": "No project override. General settings select Windows.",
+          "projectWindows": "This project runs on Windows.",
+          "liveTerminalSingular": "{{count}} terminal activo",
+          "liveTerminalPlural": "{{count}} terminales activos",
+          "activeTaskSingular": "{{count}} tarea activa",
+          "activeTaskPlural": "{{count}} tareas activas",
+          "runtimeSessionJoin": "{{value0}} y {{value1}}",
+          "runtimeSessionWarning": "{{value0}} seguirá ejecutándose en el runtime actual. Deja que las tareas terminen o reinicia las terminales antes de continuar.",
+          "pendingRuntimeChange": "Runtime change pending. New project work will use the selected runtime after you apply.",
+          "cancel": "Cancel",
+          "applyRuntimeChange": "Apply runtime change"
+        },
+        "PrivacyDiagnosticsRows": {
+          "5a7cbe069a": "DO_NOT_TRACK=1 está configurado: crear y enviar archivos de diagnóstico está deshabilitado.",
+          "63d03261d1": "ORCA_TELEMETRY_DISABLED=1 está configurado: crear y enviar archivos de diagnóstico está deshabilitado.",
+          "d37e92a06b": "ORCA_DIAGNOSTICS_DISABLED=1 está configurado: los diagnósticos de la app están desactivados.",
+          "5ebb31e1fb": "Se está ejecutando en CI: los diagnósticos están desactivados.",
+          "e27c8d45bf": "Los diagnósticos están desactivados por una variable de entorno."
+        },
+        "ShortcutCommandBlock": {
+          "eb72c52c28": "Press a shortcut, or double-tap a modifier (e.g. {{value0}}). Esc cancels.",
+          "70b5d25583": "{{value0}} shortcut",
+          "287e07ddde": "Modified",
+          "3c83cd7d1c": "Disabled",
+          "07939d084e": "Reset {{value0}} to default",
+          "9b02917027": "Reset to default",
+          "a799f90f82": "Disable {{value0}}",
+          "25e6e76618": "Disable shortcut",
+          "035a822ef0": "Add shortcut",
+          "a0e2ef0e61": "Add another shortcut for {{value0}}",
+          "245c83af24": "Add another shortcut",
+          "482a60225d": "Enable {{value0}}",
+          "6287677c37": "Enable",
+          "01481b964c": "Add shortcut for {{value0}}"
+        },
+        "ShortcutRecorderButton": {
+          "1a13bb054d": "Press shortcut keys for {{value0}}. Escape cancels.",
+          "3732775d74": "Add shortcut for {{value0}}",
+          "88764af2c1": "Change shortcut for {{value0}}",
+          "30feb099d6": "Change shortcut {{value0}} of {{value1}} for {{value2}}",
+          "5d982a2a1f": "Listening for shortcut",
+          "152e0bcd64": "Add shortcut",
+          "5bd56445da": "Change shortcut",
+          "f5ed5dcbf6": "Press keys…"
+        },
+        "ShortcutRemoveButton": {
+          "9e29aff18b": "Remove {{value0}} shortcut {{value1}}",
+          "2a9588b1c2": "Remove this binding"
         }
       },
       "right": {
@@ -8223,6 +8440,9 @@
             "cc06595a3b": "Copiar ruta de línea",
             "3596b9668d": "Copiar ruta"
           },
+          "SourceControlEntryContextMenu": {
+            "a1f2c8d901": "Ver"
+          },
           "SourceControl": {
             "1406954883": "Borrar todas las notas...",
             "cc05b2d088": "Abrir en el Explorador de archivos",
@@ -8338,6 +8558,7 @@
             "834cb3f23d": "Arreglar con IA",
             "60bd988f0b": "Corrección de IA",
             "461575b9bc": "Generar mensaje de commit con IA",
+            "b16b8f0e4b": "mensaje de commit con IA",
             "ddc1fbd690": "Dejar de generar mensaje de commit",
             "5acbcedc1a": "Crear {{value0}}",
             "aaf1451654": "Crear borrador {{value0}}",
@@ -8630,7 +8851,8 @@
                   "f49e0a21e0": "Código",
                   "542bf6a7e2": "Itálico",
                   "256300f8ea": "Atrevido",
-                  "87aff03d63": "Envío..."
+                  "87aff03d63": "Envío...",
+                  "commentTooLarge": "Comment is too large to submit safely."
                 }
               }
             }
@@ -8713,7 +8935,19 @@
                   "c39d0c75c3": "El destino de la rama de revisión vinculada no está disponible.",
                   "8c6d15a07d": "Crear PR",
                   "d37e68f61d": "Preparando la rama para revisión…",
-                  "c72e5e65d1": "Prepara esta rama y crea un {{value0}}"
+                  "c72e5e65d1": "Prepara esta rama y crea un {{value0}}",
+                  "b8e4f2a901": "Wait for the remote operation to finish.",
+                  "c9f3a1b802": "Resolve conflicts before creating a {{value0}}.",
+                  "d2a8c4e703": "No changes on this branch to include in a {{value0}}.",
+                  "e3b9d5f814": "Cannot create a {{value0}} from the default branch.",
+                  "f4c0e6a925": "Commit changes before creating a {{value0}}.",
+                  "a5d1f7b036": "Publish commits before creating a {{value0}}.",
+                  "b6e2a8c147": "Push commits before creating a {{value0}}.",
+                  "c7f3b9d258": "Sync this branch before creating a {{value0}}.",
+                  "d8a4c0e369": "Authenticate before creating a {{value0}}.",
+                  "e9b5d1f470": "Check out a branch before creating a {{value0}}.",
+                  "f0c6e2a581": "This branch is not ready for a {{value0}} yet.",
+                  "h3i4j5k607": "Checking whether this branch can create a {{value0}}…"
                 }
               }
             }
@@ -8888,6 +9122,27 @@
             "8c2d5fab13": "Copiar hash del commit",
             "9d3e60bc24": "Copiar mensaje del commit",
             "ae4f71cd35": "Explicar los cambios"
+          },
+          "pull": {
+            "policy": {
+              "notice": {
+                "merge": "Merge",
+                "mergeDescription": "Create a merge commit when local and remote both changed.",
+                "rebase": "Rebase",
+                "rebaseDescription": "Replay local commits on top of the remote branch.",
+                "fastForwardOnly": "Fast-forward only",
+                "fastForwardOnlyDescription": "Only pull when no merge or rebase is needed.",
+                "title": "Pull needs a policy",
+                "diverged": "Diverged",
+                "body": "This branch has local and remote commits. Run one command in this worktree or on the SSH host, then try Pull or Sync again.",
+                "copyAria": "Copy {{value0}} pull policy command",
+                "copied": "Copied",
+                "copyCommand": "Copy command"
+              }
+            }
+          },
+          "SourceControlEntryContextMenu": {
+            "a1f2c8d901": "View"
           }
         }
       },
@@ -10001,6 +10256,11 @@
                 }
               }
             }
+          },
+          "useEmulatorScreenKeyboard": {
+            "pasteTooLarge": "Paste is too large for emulator keyboard input.",
+            "unsupportedPasteText": "Emulator keyboard paste supports US keyboard text only.",
+            "pasteTargetUnavailable": "Emulator keyboard paste failed because the device is not ready."
           }
         }
       },
@@ -10252,7 +10512,8 @@
         },
         "MonacoEditor": {
           "68cb83f4a7": "Agregar nota sobre el texto seleccionado",
-          "fd68ae03b3": "Buscar en archivos"
+          "fd68ae03b3": "Buscar en archivos",
+          "largePasteTooLarge": "Paste is too large."
         },
         "MonacoGutterContextMenu": {
           "7b57b1b468": "Copiar URL remota",
@@ -10533,6 +10794,9 @@
               }
             }
           }
+        },
+        "richMarkdownLargeTextPaste": {
+          "tooLarge": "Paste is too large."
         }
       },
       "diff": {
@@ -10549,7 +10813,8 @@
           "DiffCommentPopover": {
             "2b3ce6d394": "Cancelar",
             "e05063cfc1": "Línea {{value0}}",
-            "c845170b3b": "Líneas {{value0}}-{{value1}}"
+            "c845170b3b": "Líneas {{value0}}-{{value1}}",
+            "commentTooLarge": "Comment is too large to submit safely."
           },
           "useDiffCommentDecorator": {
             "995fa28b50": "esta nota"
@@ -11022,7 +11287,9 @@
           "d441032f7e": "pausa",
           "5918020edc": "correr",
           "a21f6c33ad": "Automation source refreshed.",
-          "53f06f0ad5": "Retry source"
+          "53f06f0ad5": "Retry source",
+          "pendingAutomationMissing": "La automatización ya no está disponible.",
+          "pendingAutomationRunMissing": "El historial de ejecuciones ya no está disponible."
         },
         "CreateFromPicker": {
           "f061f49e3f": "Buscar sucursales de repo...",
@@ -11224,7 +11491,15 @@
           "openReviewExternally": "Abrir {{value0}} externamente",
           "summary": "{{value0}} adjuntos · {{value1}} con PR/MR · {{value2}} requieren atención · {{value3}} pendientes · {{value4}} correctos · {{value5}} sin PR · {{value6}} desconocidos",
           "showDetails": "Mostrar detalles de comprobaciones de PR de {{value0}}",
-          "hideDetails": "Ocultar detalles de comprobaciones de PR de {{value0}}"
+          "hideDetails": "Ocultar detalles de comprobaciones de PR de {{value0}}",
+          "reviewChecks": "Comprobaciones de revisión",
+          "allChecksPassing": "todas las comprobaciones correctas",
+          "oneWorktree": "1 árbol de trabajo",
+          "worktreeCount": "{{value0}} árboles de trabajo",
+          "oneFailing": "1 fallando",
+          "failingCount": "{{value0}} fallando",
+          "onePending": "1 pendiente",
+          "pendingCount": "{{value0}} pendientes"
         },
         "parentPrChecks": {
           "rowSummary": {
@@ -11325,6 +11600,25 @@
         "sourceUnavailable": "{{value0}} source unavailable: {{value1}}",
         "someSourceHostsUnavailable": "Some {{value0}} source hosts unavailable: {{value1}}",
         "reconnectOrUpdateTitle": "Reconnect or update {{value0}} to load this source."
+      },
+      "ShortcutKeyCombo": {
+        "07eb4985a1": "Double-tap {{value0}}"
+      },
+      "star": {
+        "nag": {
+          "StarNagToastHost": {
+            "starredThanks": "Starred — thank you!",
+            "githubOpened": "GitHub opened",
+            "opening": "Opening…",
+            "starring": "Starring…",
+            "openGithub": "Open GitHub",
+            "starOnGithub": "Star on GitHub",
+            "onboardingCompleted": "Onboarding completed!",
+            "body": "If you’re enjoying Orca so far, a GitHub star helps other developers discover it.",
+            "dismiss": "Dismiss",
+            "later": "Later"
+          }
+        }
       }
     },
     "i18n": {

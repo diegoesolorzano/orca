@@ -81,13 +81,13 @@ function CreatePrHeaderButton({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="inline-flex min-w-0 flex-1">
+        <span className="inline-flex shrink-0">
           <Button
             type="button"
             size="xs"
             disabled={action.disabled}
             onClick={onClick}
-            className="h-6 min-w-0 flex-1 px-2 text-[11px]"
+            className="h-6 shrink-0 px-2 text-[11px]"
             title={action.title}
           >
             {isCreatePrIntentInFlight || isCreatingPr ? (
@@ -207,8 +207,12 @@ export function SourceControlHeaderToolbar({
                 onClick={onCreatePrHeaderClick}
               />
             ) : (
-              <span className="min-w-0 flex-1" />
+              <span className="min-w-0 flex-1" aria-hidden="true" />
             )}
+            {visibleCreatePrHeaderAction && !hostedReview ? (
+              // Why: keep filter/overflow pinned right without stretching Create PR.
+              <span className="min-w-0 flex-1" aria-hidden="true" />
+            ) : null}
             <button
               type="button"
               data-testid="source-control-filter-toggle"

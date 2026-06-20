@@ -1,30 +1,15 @@
 import { homedir } from 'os'
-import { basename, join } from 'path'
+import { basename, dirname, join } from 'path'
 import type {
   AiVaultListResult,
   AiVaultScanIssue,
   AiVaultSession
 } from '../../shared/ai-vault-types'
 import { sessionSortTime } from './session-scanner-accumulator'
+import { parseAgentSessionFile } from './session-scanner-agent-parser'
 import { codexHomeForSessionsDir, uniqueCodexSessionsDirs } from './session-scanner-codex-paths'
 import { discoverFiles, discoverOpenClawFiles } from './session-scanner-discovery'
-import { parseGrokSessionFile } from './session-scanner-grok-parser'
-import {
-  parseDroidSessionFile,
-  parseMessageGraphSessionFile,
-  parseRovoSessionFile
-} from './session-scanner-graph-parsers'
-import {
-  parseClaudeSessionFile,
-  parseCodexSessionFile,
-  parseGeminiSessionFile
-} from './session-scanner-primary-parsers'
-import {
-  parseCopilotSessionFile,
-  parseCursorSessionFile,
-  parseHermesSessionFile,
-  parseOpenCodeSessionFile
-} from './session-scanner-secondary-parsers'
+import { resolveKimiSessionsDir } from './session-scanner-kimi-paths'
 import type {
   AiVaultScanOptions,
   SessionFileCandidate,
@@ -65,6 +50,11 @@ const PI_SESSIONS_DIR = normalizePiSessionsDir(
   process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), '.pi', 'agent', 'sessions')
 )
 const DROID_SESSIONS_DIR = join(homedir(), '.factory', 'sessions')
+// Why: Devin ATIF transcripts are stored under <DEVIN_HOME>/transcripts.
+const DEVIN_TRANSCRIPTS_DIR = join(
+  process.env.DEVIN_HOME?.trim() || join(homedir(), '.local', 'share', 'devin', 'cli'),
+  'transcripts'
+)
 
 export async function scanAiVaultSessions(
   options: AiVaultScanOptions = {}
@@ -133,6 +123,13 @@ export async function scanAiVaultSessions(
       filePredicate: (path) => basename(path) === 'summary.json'
     }),
     discoverFiles({
+      rootDir: options.devinTranscriptsDir ?? DEVIN_TRANSCRIPTS_DIR,
+      limit: limitPerAgent,
+      agent: 'devin',
+      issues,
+      extensions: ['.json']
+    }),
+    discoverFiles({
       rootDir: options.hermesSessionsDir ?? HERMES_SESSIONS_DIR,
       limit: limitPerAgent,
       agent: 'hermes',
@@ -176,6 +173,17 @@ export async function scanAiVaultSessions(
       agent: 'droid',
       issues,
       extensions: ['.jsonl']
+    }),
+    discoverFiles({
+      rootDir: resolveKimiSessionsDir(options.kimiSessionsDir),
+      limit: limitPerAgent,
+      agent: 'kimi',
+      issues,
+      extensions: ['.json'],
+      // Why: each Kimi session is <sessions>/wd_*/session_*/state.json; match
+      // only those (not the sibling agents/*/wire.jsonl transcripts).
+      filePredicate: (path) =>
+        basename(path) === 'state.json' && basename(dirname(path)).startsWith('session_')
     })
   ])
 
@@ -265,38 +273,6 @@ async function parseSessionCandidate(
         message: errorMessage(err)
       }
     }
-  }
-}
-
-async function parseAgentSessionFile(
-  candidate: SessionFileCandidate,
-  platform: NodeJS.Platform
-): Promise<AiVaultSession | null> {
-  switch (candidate.agent) {
-    case 'claude':
-      return parseClaudeSessionFile(candidate.file, platform)
-    case 'codex':
-      return parseCodexSessionFile(candidate.file, platform, candidate.codexHome)
-    case 'gemini':
-      return parseGeminiSessionFile(candidate.file, platform)
-    case 'copilot':
-      return parseCopilotSessionFile(candidate.file, platform)
-    case 'cursor':
-      return parseCursorSessionFile(candidate.file, platform)
-    case 'opencode':
-      return parseOpenCodeSessionFile(candidate.file, platform)
-    case 'grok':
-      return parseGrokSessionFile(candidate.file, platform)
-    case 'hermes':
-      return parseHermesSessionFile(candidate.file, platform)
-    case 'rovo':
-      return parseRovoSessionFile(candidate.file, platform)
-    case 'openclaw':
-      return parseMessageGraphSessionFile('openclaw', candidate.file, platform)
-    case 'pi':
-      return parseMessageGraphSessionFile('pi', candidate.file, platform)
-    case 'droid':
-      return parseDroidSessionFile(candidate.file, platform)
   }
 }
 

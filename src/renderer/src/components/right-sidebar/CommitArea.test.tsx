@@ -387,6 +387,7 @@ describe('CommitArea', () => {
 
     const stageAllButton = firstButton(markup)
     expect(stageAllButton).toContain('Stage All')
+    expect(stageAllButton).toContain('data-variant="outline"')
     expect(stageAllButton).not.toContain('disabled=""')
     expect(stageAllButton).toContain('lucide-plus')
     expect(stageAllButton).toContain('rounded-r-none')
@@ -419,6 +420,7 @@ describe('CommitArea', () => {
 
     const pushButton = firstButton(markup)
     expect(pushButton).toContain('Push')
+    expect(pushButton).toContain('data-variant="outline"')
     expect(pushButton).not.toContain('disabled=""')
     expect(pushButton).toContain('lucide-arrow-up')
     expect(pushButton).toContain('rounded-r-none')

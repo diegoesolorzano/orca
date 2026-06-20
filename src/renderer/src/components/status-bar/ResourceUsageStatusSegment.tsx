@@ -40,15 +40,14 @@ import type { AppMemory, UsageValues, Worktree } from '../../../../shared/types'
 import { ORPHAN_WORKTREE_ID } from '../../../../shared/constants'
 import { isFolderRepo } from '../../../../shared/repo-kind'
 import { isWorkspaceOldForCleanup } from '../../../../shared/workspace-cleanup'
-import {
-  mergeSnapshotAndSessions,
-  UNATTRIBUTED_REPO_ID,
-  type DaemonSession,
-  type Metric,
-  type UnifiedProjectGroup,
-  type UnifiedSessionRow,
-  type UnifiedWorktreeRow
-} from './mergeSnapshotAndSessions'
+import { mergeSnapshotAndSessions, UNATTRIBUTED_REPO_ID } from './mergeSnapshotAndSessions'
+import type {
+  DaemonSession,
+  Metric,
+  UnifiedProjectGroup,
+  UnifiedSessionRow,
+  UnifiedWorktreeRow
+} from './resource-usage-merge-types'
 import { WorkspaceSpaceCompactPanel } from './WorkspaceSpaceCompactPanel'
 import { STATUS_BAR_CONTEXT_MENU_EXEMPT_PROPS } from './status-bar-context-menu-policy'
 import {

@@ -58,6 +58,7 @@ import {
   getBranchSearchRequest,
   getSmartWorkspaceEmptyHint,
   getVisibleBranchResults,
+  isSmartWorkspaceSourceQueryWithinLimit,
   type SmartNameMode,
   type SmartWorkspaceSourceRow
 } from './smart-workspace-source-results'
@@ -69,6 +70,7 @@ import type {
   LinearIssue
 } from '../../../../shared/types'
 import { resolveSmartWorkspaceCommandValue } from './smart-workspace-command-value'
+import { isComposerFieldToFieldFocus } from './smart-workspace-source-popover-focus'
 import { translate } from '@/i18n/i18n'
 import {
   getMrStateFilters,
@@ -308,6 +310,10 @@ export default function SmartWorkspaceNameField({
   const repoSlugCacheRef = useRef<Map<string, RepoSlug | null>>(new Map())
   const handledCrossRepoUrlRef = useRef<string | null>(null)
   const localInputFocusFrameRef = useRef<number | null>(null)
+  // Why: dialog autofocus and other programmatic .focus() calls can look
+  // user-initiated in Electron, so gate the source popover until the user
+  // actually interacts with this field or tabs from another composer control.
+  const deferSourcePopoverUntilInteractionRef = useRef(true)
   const [crossRepoPrompt, setCrossRepoPrompt] = useState<{
     link: NonNullable<ReturnType<typeof parseGitHubIssueOrPRLink>>
     matchingRepo: RepoOption | null
@@ -406,6 +412,31 @@ export default function SmartWorkspaceNameField({
     localInputFocusFrameRef.current = null
   }, [])
 
+  const markSourcePopoverUserEngaged = useCallback((): void => {
+    deferSourcePopoverUntilInteractionRef.current = false
+  }, [])
+
+  const tryOpenSourcePopover = useCallback((): void => {
+    if (disabled || mode === 'text' || deferSourcePopoverUntilInteractionRef.current) {
+      return
+    }
+    setOpen(true)
+  }, [disabled, mode])
+
+  const handleSourcePopoverOpenChange = useCallback(
+    (next: boolean): void => {
+      if (disabled || selectedSource) {
+        setOpen(false)
+        return
+      }
+      if (next && deferSourcePopoverUntilInteractionRef.current) {
+        return
+      }
+      setOpen(next)
+    },
+    [disabled, selectedSource]
+  )
+
   const setInputNode = useCallback(
     (node: HTMLInputElement | null) => {
       if (node === null) {
@@ -484,17 +515,29 @@ export default function SmartWorkspaceNameField({
     return () => window.clearTimeout(timer)
   }, [value])
 
-  const normalizedGhQuery = useMemo(
-    () => normalizeGitHubLinkQuery(debouncedQuery),
+  const sourceQueryWithinLimit = useMemo(
+    () => isSmartWorkspaceSourceQueryWithinLimit(debouncedQuery),
     [debouncedQuery]
   )
-  const parsedGhLink = useMemo(() => parseGitHubIssueOrPRLink(debouncedQuery), [debouncedQuery])
+  const normalizedGhQuery = useMemo(
+    () => normalizeGitHubLinkQuery(sourceQueryWithinLimit ? debouncedQuery : ''),
+    [debouncedQuery, sourceQueryWithinLimit]
+  )
+  const parsedGhLink = useMemo(
+    () => (sourceQueryWithinLimit ? parseGitHubIssueOrPRLink(debouncedQuery) : null),
+    [debouncedQuery, sourceQueryWithinLimit]
+  )
   const shouldQueryGithub =
+    sourceQueryWithinLimit &&
     !repoBackedSourcesDisabled &&
     !textOnly &&
     repoBackedSearchTargets.length > 0 &&
     (mode === 'smart' || mode === 'github')
-  const shouldQueryLinear = !textOnly && linearAvailable && (mode === 'smart' || mode === 'linear')
+  const shouldQueryLinear =
+    sourceQueryWithinLimit &&
+    !textOnly &&
+    linearAvailable &&
+    (mode === 'smart' || mode === 'linear')
 
   useEffect(() => {
     if (disabled || !shouldQueryGithub) {
@@ -842,8 +885,12 @@ export default function SmartWorkspaceNameField({
   // via the project-internal `/-/` separator) and resolves it to a
   // GitLabWorkItem via the IPC. Skipped silently when the host hook
   // hasn't supplied an onGitLabItemSelect handler.
-  const parsedGlLink = useMemo(() => parseGitLabIssueOrMRLink(debouncedQuery), [debouncedQuery])
+  const parsedGlLink = useMemo(
+    () => (sourceQueryWithinLimit ? parseGitLabIssueOrMRLink(debouncedQuery) : null),
+    [debouncedQuery, sourceQueryWithinLimit]
+  )
   const shouldQueryGitlab =
+    sourceQueryWithinLimit &&
     !repoBackedSourcesDisabled &&
     !textOnly &&
     gitlabSourceAvailable &&
@@ -1026,7 +1073,11 @@ export default function SmartWorkspaceNameField({
   //     commits the typed text instead of a stale issue/PR/branch.
   //   - GitHub/Linear: no typed-text fallback row, so clear the highlight
   //     entirely; the input's Enter handler falls through to onPlainEnter.
-  const isQueryStale = value.trim().length > 0 && debouncedQuery.trim() !== value.trim()
+  const valueWithinSourceLimit = isSmartWorkspaceSourceQueryWithinLimit(value)
+  const debouncedQueryWithinSourceLimit = isSmartWorkspaceSourceQueryWithinLimit(debouncedQuery)
+  const trimmedValue = valueWithinSourceLimit ? value.trim() : ''
+  const trimmedDebouncedQuery = debouncedQueryWithinSourceLimit ? debouncedQuery.trim() : ''
+  const isQueryStale = trimmedValue.length > 0 && trimmedDebouncedQuery !== trimmedValue
 
   // Why: when the typed value is unambiguously a source reference — a
   // GitHub issue/PR shorthand ("#1234"), a github.com issue/pull URL, or a
@@ -1035,6 +1086,9 @@ export default function SmartWorkspaceNameField({
   // appears in the results, snap the highlight onto it so Enter picks it
   // instead of the typed-text fallback.
   const sourceIntent = useMemo<'github' | 'gitlab' | 'linear' | null>(() => {
+    if (!isSmartWorkspaceSourceQueryWithinLimit(value)) {
+      return null
+    }
     const trimmed = value.trim()
     if (!trimmed) {
       return null
@@ -1246,7 +1300,12 @@ export default function SmartWorkspaceNameField({
               const nextMode = next as SmartNameMode
               onActiveSourceModeChange?.(nextMode)
               setMode(nextMode)
-              setOpen(!disabled && nextMode !== 'text' && selectedSource === null)
+              if (!disabled && nextMode !== 'text' && selectedSource === null) {
+                markSourcePopoverUserEngaged()
+                setOpen(true)
+              } else {
+                setOpen(false)
+              }
               cancelLocalInputFocusFrame()
               localInputFocusFrameRef.current = requestAnimationFrame(() => {
                 localInputFocusFrameRef.current = null
@@ -1297,7 +1356,7 @@ export default function SmartWorkspaceNameField({
 
       <Popover
         open={!disabled && open && mode !== 'text' && selectedSource === null}
-        onOpenChange={(next) => setOpen(disabled || selectedSource ? false : next)}
+        onOpenChange={handleSourcePopoverOpenChange}
       >
         <Command
           value={resolvedCommandValue}
@@ -1397,16 +1456,29 @@ export default function SmartWorkspaceNameField({
                     ref={setInputNode}
                     data-workspace-name-input="true"
                     value={value}
-                    onChange={(event) => {
-                      onValueChange(event.target.value)
+                    onPointerDown={() => {
                       if (!disabled && mode !== 'text') {
+                        markSourcePopoverUserEngaged()
                         setOpen(true)
                       }
                     }}
-                    onFocus={() => {
+                    onChange={(event) => {
+                      onValueChange(event.target.value)
                       if (!disabled && mode !== 'text') {
+                        markSourcePopoverUserEngaged()
                         setOpen(true)
                       }
+                    }}
+                    onFocus={(event) => {
+                      // Why: only open when focus moves from another composer
+                      // control (Tab/Shift+Tab). Dialog autofocus comes from
+                      // outside the composer root and stays suppressed until
+                      // click/type/tab-within-composer engagement above.
+                      if (!isComposerFieldToFieldFocus(event)) {
+                        return
+                      }
+                      markSourcePopoverUserEngaged()
+                      tryOpenSourcePopover()
                     }}
                     onKeyDown={(event) => {
                       if (event.key === 'Tab' && event.shiftKey) {

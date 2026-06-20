@@ -274,10 +274,14 @@ export class DaemonServer {
           env: p.env,
           envToDelete: p.envToDelete,
           command: p.command,
+          startupCommandDelivery: p.startupCommandDelivery,
           shellOverride: p.shellOverride,
           terminalWindowsWslDistro: p.terminalWindowsWslDistro,
           terminalWindowsPowerShellImplementation: p.terminalWindowsPowerShellImplementation,
           shellReadySupported: p.shellReadySupported,
+          ...(p.shellReadyTimeoutMs !== undefined
+            ? { shellReadyTimeoutMs: p.shellReadyTimeoutMs }
+            : {}),
           streamClient: {
             onData: (data) => {
               const lastInputAt = this.lastInputAtBySessionId.get(p.sessionId)

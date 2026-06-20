@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const FIELD_SOURCE = readFileSync(join(__dirname, 'SmartWorkspaceNameField.tsx'), 'utf8')
+const FIELD_SOURCE = readFileSync(join(__dirname, 'SmartWorkspaceNameField.tsx'), 'utf8').replace(
+  /\r\n?/g,
+  '\n'
+)
 
 function sourceBetween(source: string, startPattern: string, endPattern: string): string {
   const start = source.indexOf(startPattern)
@@ -86,5 +89,13 @@ describe('SmartWorkspaceNameField repo-backed source boundaries', () => {
     expect(FIELD_SOURCE).toContain('onActiveSourceModeChange')
     expect(FIELD_SOURCE).toContain('onActiveSourceModeChange?.(mode)')
     expect(FIELD_SOURCE).toContain('[mode, onActiveSourceModeChange]')
+  })
+
+  it('defers the source popover until composer interaction', () => {
+    expect(FIELD_SOURCE).toContain('deferSourcePopoverUntilInteractionRef')
+    expect(FIELD_SOURCE).toContain('handleSourcePopoverOpenChange')
+    expect(FIELD_SOURCE).toContain('isComposerFieldToFieldFocus')
+    expect(FIELD_SOURCE).toContain('onPointerDown={() => {')
+    expect(FIELD_SOURCE).toContain('markSourcePopoverUserEngaged()')
   })
 })

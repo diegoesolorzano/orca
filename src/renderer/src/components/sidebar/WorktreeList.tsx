@@ -1,5 +1,6 @@
 /* eslint-disable max-lines */
 import React, { useMemo, useCallback, useRef, useState, useEffect, useLayoutEffect } from 'react'
+import { toast } from 'sonner'
 import {
   measureElement as measureVirtualElementSize,
   useVirtualizer
@@ -159,7 +160,6 @@ import {
   setSidebarPointerDragDocumentStyles,
   updateSidebarDragPreviewPosition
 } from './worktree-sidebar-pointer-drag-dom'
-import { shouldStartWorkspaceBoardDragPreview } from './workspace-board-drag-preview-intent'
 import {
   getWorktreeSidebarDragAutoscroll,
   getWorktreeSidebarDragRectsForGroup,
@@ -176,6 +176,10 @@ import {
   type WorktreeSidebarDropPreview
 } from './worktree-sidebar-drop-preview'
 import { resolveProjectGroupHeaderColor } from './project-header-color'
+import {
+  REPO_HEADER_ACTION_BUTTON_CLASS,
+  REPO_HEADER_ACTION_REVEAL_CLASS
+} from './repo-header-action-button-class'
 import {
   areWorktreeSelectionsEqual,
   getWorktreeSelectionIntent,
@@ -211,9 +215,13 @@ import {
   showImportedWorktreesCard,
   type ImportedWorktreeCardActionState
 } from './imported-worktrees-card-actions'
+import { getEligibleWorktreeParents } from './worktree-parent-candidates'
 import { buildImportedWorktreesCardCandidates } from './imported-worktrees-card-candidates'
 import {
   WORKTREE_SECTION_HEADER_PADDING_LEFT,
+  LINEAGE_CHILDREN_INLINE_OFFSET,
+  getLineageChildrenInlineStyle,
+  getLineageNestedRowGeometry,
   getProjectGroupHeaderPaddingLeft,
   getWorktreeCardContentIndent,
   getWorktreeCardSurfaceInset
@@ -223,7 +231,7 @@ import { orderHostSectionOptions } from './host-section-order'
 import { useHostHeaderDrag } from './host-header-drag'
 import { buildSidebarHostOptions } from './sidebar-host-options'
 import { HostSectionHeaderMenu } from './HostSectionHeaderMenu'
-import { toast } from 'sonner'
+import { ProjectHeaderActions } from './ProjectHeaderActions'
 import { translate } from '@/i18n/i18n'
 import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
 import { getHostDisplayLabelOverrides } from '../../../../shared/host-setting-overrides'
@@ -266,6 +274,7 @@ const EMPTY_PROJECT_GROUPS: readonly ProjectGroup[] = []
 const EMPTY_AGENT_STATUS_BY_PANE_KEY: AppState['agentStatusByPaneKey'] = {}
 const EMPTY_TABS_BY_WORKTREE: AppState['tabsByWorktree'] = {}
 const EMPTY_TERMINAL_LAYOUTS_BY_TAB_ID: AppState['terminalLayoutsByTabId'] = {}
+const EMPTY_PTY_IDS_BY_TAB_ID: AppState['ptyIdsByTabId'] = {}
 const EXPANDING_CARD_MEASUREMENT_ADJUSTMENT_SUPPRESS_MS = 300
 const NOOP_WORKSPACE_BOARD_DRAG_PREVIEW_CALLBACK = (): void => {}
 const WORKTREE_SIDEBAR_SCROLL_STYLE: React.CSSProperties = {
@@ -773,11 +782,11 @@ function areWorktreeDragPreviewOffsetsEqual(
 
 function updateLatestWorktreeStatusDropTarget(
   drag: WorktreePointerDrag,
-  target: WorktreeSidebarStatusDropTarget,
+  target: WorktreeSidebarStatusDropTarget & { lineageParentId: string | null },
   preview: WorktreeSidebarDropPreview | null
 ): void {
   drag.latestStatusDropTarget =
-    target.status || target.isPinDrop
+    target.status || target.isPinDrop || target.lineageParentId
       ? {
           target,
           preview,
@@ -796,14 +805,19 @@ function getPointerDropStatusTarget(args: {
   container: HTMLElement
   x: number
   y: number
-}): WorktreeSidebarStatusDropTarget {
+}): WorktreeSidebarStatusDropTarget & { lineageParentId: string | null } {
   const target = document.elementFromPoint(args.x, args.y)
   if (!(target instanceof Element) || !args.container.contains(target)) {
-    return { status: null, isPinDrop: false }
+    return { status: null, isPinDrop: false, lineageParentId: null }
   }
   const pinTarget = target.closest<HTMLElement>('[data-workspace-pin-drop-target]')
   if (pinTarget && args.container.contains(pinTarget)) {
-    return { status: null, isPinDrop: true }
+    return { status: null, isPinDrop: true, lineageParentId: null }
+  }
+  const rowTarget = target.closest<HTMLElement>('[data-worktree-drag-id]')
+  let lineageParentId: string | null = null
+  if (rowTarget && args.container.contains(rowTarget)) {
+    lineageParentId = rowTarget.dataset.worktreeDragId ?? null
   }
   const statusTarget = target.closest<HTMLElement>('[data-workspace-status-drop-target]')
   return {
@@ -811,7 +825,8 @@ function getPointerDropStatusTarget(args: {
       statusTarget && args.container.contains(statusTarget)
         ? ((statusTarget.dataset.workspaceStatus as WorkspaceStatus | undefined) ?? null)
         : null,
-    isPinDrop: false
+    isPinDrop: false,
+    lineageParentId
   }
 }
 
@@ -1107,6 +1122,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   const directScrollInputUntilRef = useRef(0)
   const [dragOverStatus, setDragOverStatus] = useState<WorkspaceStatus | null>(null)
   const [pinDragOver, setPinDragOver] = useState(false)
+  const [nativeLineageDropTargetId, setNativeLineageDropTargetId] = useState<string | null>(null)
   const [worktreeDragState, setWorktreeDragState] = useState<WorktreeRowDragState>(
     WORKTREE_ROW_DRAG_INITIAL_STATE
   )
@@ -1116,6 +1132,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     null
   )
   const setRenamingWorktreeId = useAppStore((s) => s.setRenamingWorktreeId)
+  const assignWorktreeParent = useAppStore((s) => s.assignWorktreeParent)
   const worktreeDragSessionRef = useRef<WorktreeSidebarDragSession | null>(null)
   const worktreePointerDragRef = useRef<WorktreePointerDrag | null>(null)
   const worktreePointerAutoscrollFrameIdRef = useRef<number | null>(null)
@@ -1184,6 +1201,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   const sshConnectedGeneration = useAppStore((s) => s.sshConnectedGeneration)
   const prVisibleRefreshGeneration = useAppStore((s) => s.prVisibleRefreshGeneration)
   const settings = useAppStore((s) => s.settings)
+  const newCardStyle = settings?.experimentalNewWorktreeCardStyle === true
   const reorderRepos = useAppStore((s) => s.reorderRepos)
 
   useEffect(
@@ -2108,6 +2126,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   const cleanupWorktreePointerDrag = useCallback(() => {
     const drag = worktreePointerDragRef.current
     cancelWorktreePointerAutoscroll()
+    setNativeLineageDropTargetId(null)
     if (!drag) {
       return
     }
@@ -2150,6 +2169,58 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     ]
   )
 
+  const getEligibleLineageDropTarget = useCallback(
+    (
+      target: WorktreeSidebarStatusDropTarget & { lineageParentId: string | null },
+      draggedIds: readonly string[]
+    ): WorktreeSidebarStatusDropTarget & { lineageParentId: string | null } => {
+      const parentId = target.lineageParentId
+      if (!parentId) {
+        return target
+      }
+      const canAssignAll = draggedIds.every((draggedId) => {
+        const child = worktreeMap.get(draggedId)
+        if (!child) {
+          return false
+        }
+        return getEligibleWorktreeParents({
+          child,
+          worktrees,
+          lineageById: worktreeLineageById,
+          worktreeMap,
+          repoMap
+        }).some((candidate) => candidate.id === parentId)
+      })
+      return canAssignAll ? target : { ...target, lineageParentId: null }
+    },
+    [repoMap, worktreeLineageById, worktreeMap, worktrees]
+  )
+
+  const commitWorktreeLineageParentDrop = useCallback(
+    (draggedIds: readonly string[], parentId: string): boolean => {
+      const target = getEligibleLineageDropTarget(
+        { status: null, isPinDrop: false, lineageParentId: parentId },
+        draggedIds
+      )
+      if (!target.lineageParentId) {
+        return false
+      }
+      void Promise.all(
+        draggedIds.map((id) => assignWorktreeParent(id, { parentWorktreeId: parentId }))
+      ).catch((err) => {
+        console.error('Failed to nest workspace:', err)
+        toast.error(
+          translate(
+            'auto.components.sidebar.WorktreeList.failedNestWorkspace',
+            'Failed to nest workspace'
+          )
+        )
+      })
+      return true
+    },
+    [assignWorktreeParent, getEligibleLineageDropTarget]
+  )
+
   const flushWorktreePointerDrag = useCallback(() => {
     const drag = worktreePointerDragRef.current
     if (!drag) {
@@ -2170,24 +2241,16 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
       clearWorktreeDrag()
       return
     }
-    const previewSidebarContainer = scrollRef.current
+    // Why: reveal the companion board preview the moment a card drag begins so the
+    // user sees the drop target on the right and can choose whether to aim for it,
+    // rather than discovering it only after dragging into the sidebar edge.
     if (
       !drag.workspaceBoardDragPreviewRequested &&
       !workspaceBoardOpen &&
-      previewSidebarContainer
+      !hasWorkspaceKanbanSidebarDropBoard()
     ) {
-      const sidebarRect = previewSidebarContainer.getBoundingClientRect()
-      if (
-        shouldStartWorkspaceBoardDragPreview({
-          pointerX: drag.currentX,
-          startX: drag.startX,
-          sidebarRight: sidebarRect.right
-        }) &&
-        !hasWorkspaceKanbanSidebarDropBoard()
-      ) {
-        drag.workspaceBoardDragPreviewRequested = true
-        onWorkspaceBoardDragPreviewStart()
-      }
+      drag.workspaceBoardDragPreviewRequested = true
+      onWorkspaceBoardDragPreviewStart()
     }
     const boardTarget = updateWorkspaceKanbanSidebarDropTargetVisual({
       x: drag.currentX,
@@ -2227,13 +2290,37 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     }
 
     const sidebarContainer = scrollRef.current
-    const preferredStatusTarget = sidebarContainer
-      ? getPointerDropStatusTarget({
-          container: sidebarContainer,
-          x: drag.currentX,
-          y: drag.currentY
-        })
-      : { status: null, isPinDrop: false }
+    const preferredStatusTarget = getEligibleLineageDropTarget(
+      sidebarContainer
+        ? getPointerDropStatusTarget({
+            container: sidebarContainer,
+            x: drag.currentX,
+            y: drag.currentY
+          })
+        : { status: null, isPinDrop: false, lineageParentId: null },
+      drag.draggedIds
+    )
+    if (preferredStatusTarget.lineageParentId) {
+      updateLatestWorktreeStatusDropTarget(drag, preferredStatusTarget, null)
+      clearWorkspaceKanbanSidebarDropTargetVisual()
+      setDragOverStatus(null)
+      setPinDragOver(false)
+      setWorktreeDragState((prev) =>
+        prev.dropIndex === null &&
+        prev.dropIndicatorY === null &&
+        prev.pointerY === drag.currentY &&
+        prev.previewOffsetsByWorktreeId.size === 0
+          ? prev
+          : {
+              ...prev,
+              dropIndex: null,
+              dropIndicatorY: null,
+              previewOffsetsByWorktreeId: EMPTY_WORKTREE_DRAG_PREVIEW_OFFSETS,
+              pointerY: drag.currentY
+            }
+      )
+      return
+    }
     if (
       shouldPreferSidebarStatusDropTarget({
         sourceGroupKey: drag.sourceGroupKey,
@@ -2356,6 +2443,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     refreshWorktreeDragSession,
     onWorkspaceBoardDragPreviewCommit,
     shouldShowWorkspaceBoardDropIndicator,
+    getEligibleLineageDropTarget,
     workspaceBoardOpen,
     workspaceStatuses
   ])
@@ -2589,13 +2677,21 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
           groups: getWorkspaceKanbanSidebarDropGroups()
         })
       } else {
-        const preferredStatusTarget = scrollRef.current
-          ? getPointerDropStatusTarget({
-              container: scrollRef.current,
-              x: event.clientX,
-              y: event.clientY
-            })
-          : { status: null, isPinDrop: false }
+        const preferredStatusTarget = getEligibleLineageDropTarget(
+          scrollRef.current
+            ? getPointerDropStatusTarget({
+                container: scrollRef.current,
+                x: event.clientX,
+                y: event.clientY
+              })
+            : { status: null, isPinDrop: false, lineageParentId: null },
+          drag.draggedIds
+        )
+        if (preferredStatusTarget.lineageParentId) {
+          commitWorktreeLineageParentDrop(drag.draggedIds, preferredStatusTarget.lineageParentId)
+          clearWorktreeDrag()
+          return
+        }
         if (
           shouldPreferSidebarStatusDropTarget({
             sourceGroupKey: drag.sourceGroupKey,
@@ -2655,7 +2751,9 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
             x: event.clientX,
             y: event.clientY
           })
-          if (target.isPinDrop) {
+          if (target.lineageParentId) {
+            commitWorktreeLineageParentDrop(drag.draggedIds, target.lineageParentId)
+          } else if (target.isPinDrop) {
             onPinWorktrees(drag.draggedIds)
           } else if (target.status) {
             if (statusDrop) {
@@ -2693,8 +2791,10 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   }, [
     beginWorktreePointerDrag,
     clearWorktreeDrag,
+    commitWorktreeLineageParentDrop,
     computeWorktreeDrop,
     computeWorktreeStatusDrop,
+    getEligibleLineageDropTarget,
     onMoveWorktreesToStatus,
     onMoveWorktreesToStatusAtIndex,
     onDropWorktreesOnWorkspaceBoard,
@@ -2876,13 +2976,37 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         clearWorktreeDrag()
         return
       }
-      const drop = computeWorktreeDrop(event.clientY)
-      if (!drop) {
-        const target = getPointerDropStatusTarget({
+      const target = getEligibleLineageDropTarget(
+        getPointerDropStatusTarget({
           container: event.currentTarget,
           x: event.clientX,
           y: event.clientY
-        })
+        }),
+        session.draggedIds
+      )
+      if (target.lineageParentId) {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        setNativeLineageDropTargetId(target.lineageParentId)
+        setWorktreeDragState((prev) =>
+          prev.dropIndex === null &&
+          prev.dropIndicatorY === null &&
+          prev.previewOffsetsByWorktreeId.size === 0
+            ? prev
+            : {
+                ...prev,
+                dropIndex: null,
+                dropIndicatorY: null,
+                previewOffsetsByWorktreeId: EMPTY_WORKTREE_DRAG_PREVIEW_OFFSETS,
+                pointerY: event.clientY
+              }
+        )
+        return
+      }
+      setNativeLineageDropTargetId(null)
+
+      const drop = computeWorktreeDrop(event.clientY)
+      if (!drop) {
         const statusDrop = target.status
           ? computeWorktreeStatusDrop({
               pointerY: event.clientY,
@@ -2937,6 +3061,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
       clearWorktreeDrag,
       computeWorktreeDrop,
       computeWorktreeStatusDrop,
+      getEligibleLineageDropTarget,
       refreshWorktreeDragSession,
       startWorktreeNativeAutoscroll
     ]
@@ -2957,16 +3082,29 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         clearWorktreeDrag()
         return
       }
-      const drop = computeWorktreeDrop(event.clientY)
-      if (!drop) {
-        const container = scrollRef.current
-        const target = container
+
+      const container = scrollRef.current
+      const target = getEligibleLineageDropTarget(
+        container
           ? getPointerDropStatusTarget({
               container,
               x: event.clientX,
               y: event.clientY
             })
-          : { status: null, isPinDrop: false }
+          : { status: null, isPinDrop: false, lineageParentId: null },
+        session.draggedIds
+      )
+
+      if (target.lineageParentId) {
+        event.preventDefault()
+        event.stopPropagation()
+        commitWorktreeLineageParentDrop(session.draggedIds, target.lineageParentId)
+        clearWorktreeDrag()
+        return
+      }
+
+      const drop = computeWorktreeDrop(event.clientY)
+      if (!drop) {
         const statusDrop = target.status
           ? computeWorktreeStatusDrop({
               pointerY: event.clientY,
@@ -3004,8 +3142,10 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     },
     [
       clearWorktreeDrag,
+      commitWorktreeLineageParentDrop,
       computeWorktreeDrop,
       computeWorktreeStatusDrop,
+      getEligibleLineageDropTarget,
       onMoveWorktreesToStatusAtIndex,
       onReorderWorktrees,
       refreshWorktreeDragSession,
@@ -3028,7 +3168,10 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         (currentWorktree.linkedPR ?? null) !== null)
     const shouldTrackSidebarWorktree = rightSidebarShowsPR && sidebarWorktreeHasGitHubReview
     const shouldTrackVisibleRows =
-      groupBy === 'pr-status' || cardProps.includes('pr') || cardProps.includes('ci')
+      groupBy === 'pr-status' ||
+      (newCardStyle
+        ? cardProps.includes('status')
+        : cardProps.includes('pr') || cardProps.includes('ci'))
     if (!shouldTrackVisibleRows && !shouldTrackSidebarWorktree) {
       if (lastVisibleRefreshKeyRef.current !== '__hidden__') {
         lastVisibleRefreshKeyRef.current = '__hidden__'
@@ -3079,6 +3222,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     prVisibleRefreshGeneration,
     rightSidebarShowsPR,
     sshConnectedGeneration,
+    newCardStyle,
     virtualItems,
     worktreeMap
   ])
@@ -3193,13 +3337,23 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
       const drop = computeWorktreeDrop(event.clientY)
       if (!drop) {
         const container = scrollRef.current
-        const target = container
-          ? getPointerDropStatusTarget({
-              container,
-              x: event.clientX,
-              y: event.clientY
-            })
-          : { status: null, isPinDrop: false }
+        const target = getEligibleLineageDropTarget(
+          container
+            ? getPointerDropStatusTarget({
+                container,
+                x: event.clientX,
+                y: event.clientY
+              })
+            : { status: null, isPinDrop: false, lineageParentId: null },
+          session.draggedIds
+        )
+        if (target.lineageParentId) {
+          event.preventDefault()
+          event.stopPropagation()
+          commitWorktreeLineageParentDrop(session.draggedIds, target.lineageParentId)
+          clearWorktreeDrag()
+          return
+        }
         const statusDrop = target.status
           ? computeWorktreeStatusDrop({
               pointerY: event.clientY,
@@ -3244,8 +3398,10 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     return () => document.removeEventListener('drop', handleDocumentDrop, true)
   }, [
     clearWorktreeDrag,
+    commitWorktreeLineageParentDrop,
     computeWorktreeDrop,
     computeWorktreeStatusDrop,
+    getEligibleLineageDropTarget,
     onMoveWorktreesToStatusAtIndex,
     onReorderWorktrees,
     refreshWorktreeDragSession,
@@ -3465,7 +3621,6 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                 isRepoHeader || isProjectGroupHeader
                   ? getProjectGroupHeaderPaddingLeft(projectGroupDepth)
                   : WORKTREE_SECTION_HEADER_PADDING_LEFT
-              const isCollapsed = collapsedGroups.has(row.key)
               return (
                 <div
                   key={vItem.key}
@@ -3502,7 +3657,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                     data-workspace-status={headerWorkspaceStatus ?? undefined}
                     data-workspace-pin-drop-target={isPinnedHeader ? '' : undefined}
                     className={cn(
-                      'group flex h-7 w-full items-center gap-1.5 pr-1 text-left transition-all',
+                      'group relative flex h-7 w-full items-center gap-1.5 pr-2 text-left transition-all',
                       'cursor-pointer',
                       isDraggingThis &&
                         'bg-accent/80 ring-1 ring-ring/40 shadow-md rounded-md scale-[1.01]',
@@ -3587,359 +3742,354 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                         </div>
                         <RepoForkIndicator upstream={row.repo?.upstream} />
                         <FolderPathStatusIndicator status={projectGroupPathStatus} />
-                        <SectionMetricsBadge count={row.count} />
                       </div>
                     </div>
 
-                    <div className="flex size-4 shrink-0 cursor-pointer items-center justify-center text-muted-foreground/60 can-hover:opacity-0 transition-opacity group-hover:opacity-100">
-                      <ChevronDown
-                        className={cn(
-                          'size-3.5 cursor-pointer transition-transform [&_path]:cursor-pointer',
-                          isCollapsed && '-rotate-90'
-                        )}
-                      />
-                    </div>
-
-                    {isProjectGroupHeader && !row.repo && row.projectGroup?.id ? (
-                      <DropdownMenu modal={false}>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-xs"
-                            data-repo-header-action=""
-                            className="size-5 shrink-0 rounded-md text-muted-foreground can-hover:opacity-0 transition-opacity hover:bg-accent/70 hover:text-foreground focus:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
-                            aria-label={translate(
-                              'auto.components.sidebar.WorktreeList.79465e9034',
-                              'Group actions for {{value0}}',
-                              { value0: row.label }
-                            )}
-                            onClick={(event) => event.stopPropagation()}
-                            onKeyDown={stopRepoHeaderKeyboardToggle}
-                            onPointerDown={handleRepoHeaderActionPointerDown}
-                          >
-                            <Ellipsis className="size-3.5" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="end"
-                          side="bottom"
-                          sideOffset={6}
-                          // Why: Radix portals preserve React bubbling through
-                          // the project header. Keep menu interactions from
-                          // arming row drag/collapse handlers behind it.
-                          onPointerDown={stopRepoHeaderMenuEvent}
-                          onMouseDown={stopRepoHeaderMenuEvent}
-                          onPointerUp={stopRepoHeaderMenuEvent}
-                          onMouseUp={stopRepoHeaderMenuEvent}
-                          onClick={stopRepoHeaderMenuEvent}
-                          onKeyDown={stopRepoHeaderMenuEvent}
-                        >
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              if (row.projectGroup?.id) {
-                                handleRenameProjectGroup(row.projectGroup.id, row.label)
-                              }
-                            }}
-                          >
-                            {translate(
-                              'auto.components.sidebar.WorktreeList.4d7b73658c',
-                              'Rename group'
-                            )}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onSelect={() => {
-                              if (row.projectGroup?.id) {
-                                handleDeleteProjectGroup(row.projectGroup.id, row.label)
-                              }
-                            }}
-                          >
-                            {translate(
-                              'auto.components.sidebar.WorktreeList.902115cdbe',
-                              'Delete group'
-                            )}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    ) : null}
-
-                    {isProjectGroupHeader &&
-                    !row.repo &&
-                    row.projectGroup &&
-                    'parentPath' in row.projectGroup &&
-                    row.projectGroup.parentPath ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-xs"
-                            data-repo-header-action=""
-                            className={cn(
-                              'size-5 shrink-0 rounded-md text-muted-foreground can-hover:opacity-0 transition-opacity hover:bg-accent/70 hover:text-foreground focus:opacity-100 group-hover:opacity-100',
-                              folderWorkspaceCreateDisabled &&
-                                'cursor-not-allowed text-muted-foreground/60 hover:bg-transparent hover:text-muted-foreground/60'
-                            )}
-                            aria-label={translate(
-                              'auto.components.sidebar.WorktreeList.bd37a57ac8',
-                              'Create workspace for {{value0}}',
-                              { value0: row.label }
-                            )}
-                            aria-disabled={folderWorkspaceCreateDisabled}
-                            onKeyDown={stopRepoHeaderKeyboardToggle}
-                            onPointerDown={handleRepoHeaderActionPointerDown}
-                            onClick={(event) => {
-                              event.preventDefault()
-                              event.stopPropagation()
-                              if (folderWorkspaceCreateDisabled) {
-                                return
-                              }
-                              if (
-                                row.projectGroup &&
-                                'parentPath' in row.projectGroup &&
-                                row.projectGroup.parentPath
-                              ) {
-                                handleCreateFolderWorkspace(row.projectGroup)
-                              }
-                            }}
-                          >
-                            <Plus className="size-3" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" sideOffset={6}>
-                          {projectGroupPathStatus?.exists === false
-                            ? getFolderWorkspacePathStatusDescription(projectGroupPathStatus)
-                            : translate(
-                                'auto.components.sidebar.WorktreeList.bd37a57ac8',
-                                'Create workspace for {{value0}}',
+                    <ProjectHeaderActions>
+                      {isProjectGroupHeader && !row.repo && row.projectGroup?.id ? (
+                        <DropdownMenu modal={false}>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-xs"
+                              className={REPO_HEADER_ACTION_BUTTON_CLASS}
+                              data-repo-header-action=""
+                              aria-label={translate(
+                                'auto.components.sidebar.WorktreeList.79465e9034',
+                                'Group actions for {{value0}}',
                                 { value0: row.label }
                               )}
-                        </TooltipContent>
-                      </Tooltip>
-                    ) : null}
-
-                    {row.repo && groupBy === 'repo' ? (
-                      <DropdownMenu modal={false}>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-xs"
-                                data-repo-header-action=""
-                                className="size-5 shrink-0 rounded-md text-muted-foreground can-hover:opacity-0 transition-opacity hover:bg-accent/70 hover:text-foreground focus:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
-                                aria-label={translate(
-                                  'auto.components.sidebar.WorktreeList.609633a9e6',
-                                  'Project actions for {{value0}}',
-                                  { value0: row.label }
-                                )}
-                                onClick={(event) => event.stopPropagation()}
-                                onKeyDown={stopRepoHeaderKeyboardToggle}
-                                onPointerDown={handleRepoHeaderActionPointerDown}
-                              >
-                                <Ellipsis className="size-3.5" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom" sideOffset={6}>
-                            {translate(
-                              'auto.components.sidebar.WorktreeList.2ef41bf9a7',
-                              'Project actions'
-                            )}
-                          </TooltipContent>
-                        </Tooltip>
-                        <DropdownMenuContent
-                          align="end"
-                          side="bottom"
-                          sideOffset={6}
-                          // Why: Radix portals preserve React bubbling through
-                          // the project header. Keep menu interactions from
-                          // arming row drag/collapse handlers behind it.
-                          onPointerDown={stopRepoHeaderMenuEvent}
-                          onMouseDown={stopRepoHeaderMenuEvent}
-                          onPointerUp={stopRepoHeaderMenuEvent}
-                          onMouseUp={stopRepoHeaderMenuEvent}
-                          onClick={stopRepoHeaderMenuEvent}
-                          onKeyDown={stopRepoHeaderMenuEvent}
-                        >
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              if (row.repo) {
-                                handleOpenRepoSettings(row.repo.id)
-                              }
-                            }}
-                          >
-                            <SlidersHorizontal className="size-3.5" />
-                            {translate(
-                              'auto.components.sidebar.WorktreeList.2cdffbc728',
-                              'Project Settings'
-                            )}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              if (row.repo) {
-                                handleOpenRepoSettings(
-                                  row.repo.id,
-                                  getRepositoryIconSectionId(row.repo.id)
-                                )
-                              }
-                            }}
-                          >
-                            <Shapes className="size-3.5" />
-                            {translate(
-                              'auto.components.sidebar.WorktreeList.e82d3589a1',
-                              'Change Project Icon'
-                            )}
-                          </DropdownMenuItem>
-                          {row.repo && isGitRepoKind(row.repo) ? (
-                            <DropdownMenuItem
-                              onSelect={() => {
-                                if (row.repo) {
-                                  handleOpenWorktreeVisibility(row.repo.id)
-                                }
-                              }}
-                            >
-                              <Eye className="size-3.5" />
-                              {getWorktreeVisibilityMenuLabel(row.repo)}
-                            </DropdownMenuItem>
-                          ) : null}
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              if (row.repo) {
-                                handleCreateGroupFromRepo(row.repo)
-                              }
-                            }}
-                          >
-                            <FolderPlus className="size-3.5" />
-                            {translate(
-                              'auto.components.sidebar.WorktreeList.cbfd565f83',
-                              'New group from project'
-                            )}
-                          </DropdownMenuItem>
-                          {projectGroups.length > 0 ? (
-                            <DropdownMenuSub>
-                              <DropdownMenuSubTrigger>
-                                <FolderInput className="size-3.5" />
-                                {translate(
-                                  'auto.components.sidebar.WorktreeList.4a08fb55f2',
-                                  'Move to group'
-                                )}
-                              </DropdownMenuSubTrigger>
-                              <DropdownMenuSubContent>
-                                {projectGroups.map((group) => (
-                                  <DropdownMenuItem
-                                    key={group.id}
-                                    disabled={row.repo?.projectGroupId === group.id}
-                                    onSelect={() => {
-                                      if (row.repo) {
-                                        handleMoveProjectToGroup(row.repo, group.id)
-                                      }
-                                    }}
-                                  >
-                                    <span className="max-w-48 truncate">{group.name}</span>
-                                  </DropdownMenuItem>
-                                ))}
-                              </DropdownMenuSubContent>
-                            </DropdownMenuSub>
-                          ) : null}
-                          {row.repo.projectGroupId ? (
-                            <DropdownMenuItem
-                              onSelect={() => {
-                                if (row.repo) {
-                                  handleRemoveProjectFromGroup(row.repo)
-                                }
-                              }}
-                            >
-                              <CircleX className="size-3.5" />
-                              {translate(
-                                'auto.components.sidebar.WorktreeList.64e55f7f01',
-                                'Remove from group'
-                              )}
-                            </DropdownMenuItem>
-                          ) : null}
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onSelect={() => {
-                              if (row.repo) {
-                                handleRemoveProject(row.repo)
-                              }
-                            }}
-                          >
-                            <Trash2 className="size-3.5" />
-                            {translate(
-                              'auto.components.sidebar.WorktreeList.c83968f87f',
-                              'Remove Project'
-                            )}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    ) : null}
-
-                    {row.repo && groupBy === 'repo' ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          {createState?.disabled ? (
-                            <span
-                              data-repo-header-action=""
-                              className="inline-flex cursor-not-allowed can-hover:opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100"
-                              tabIndex={0}
-                              aria-label={createState.ariaLabel}
-                              onKeyDown={stopRepoHeaderKeyboardToggle}
                               onClick={(event) => event.stopPropagation()}
+                              onKeyDown={stopRepoHeaderKeyboardToggle}
                               onPointerDown={handleRepoHeaderActionPointerDown}
                             >
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-xs"
-                                className="pointer-events-none size-5 shrink-0 rounded-md text-muted-foreground transition-opacity opacity-60"
-                                aria-label={createState.ariaLabel}
-                                disabled
-                              >
-                                <Plus className="size-3" />
-                              </Button>
-                            </span>
-                          ) : (
+                              <Ellipsis className="size-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="end"
+                            side="bottom"
+                            sideOffset={6}
+                            // Why: Radix portals preserve React bubbling through
+                            // the project header. Keep menu interactions from
+                            // arming row drag/collapse handlers behind it.
+                            onPointerDown={stopRepoHeaderMenuEvent}
+                            onMouseDown={stopRepoHeaderMenuEvent}
+                            onPointerUp={stopRepoHeaderMenuEvent}
+                            onMouseUp={stopRepoHeaderMenuEvent}
+                            onClick={stopRepoHeaderMenuEvent}
+                            onKeyDown={stopRepoHeaderMenuEvent}
+                          >
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                if (row.projectGroup?.id) {
+                                  handleRenameProjectGroup(row.projectGroup.id, row.label)
+                                }
+                              }}
+                            >
+                              {translate(
+                                'auto.components.sidebar.WorktreeList.4d7b73658c',
+                                'Rename group'
+                              )}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onSelect={() => {
+                                if (row.projectGroup?.id) {
+                                  handleDeleteProjectGroup(row.projectGroup.id, row.label)
+                                }
+                              }}
+                            >
+                              {translate(
+                                'auto.components.sidebar.WorktreeList.902115cdbe',
+                                'Delete group'
+                              )}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : null}
+
+                      {isProjectGroupHeader &&
+                      !row.repo &&
+                      row.projectGroup &&
+                      'parentPath' in row.projectGroup &&
+                      row.projectGroup.parentPath ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
                             <Button
                               type="button"
                               variant="ghost"
                               size="icon-xs"
                               data-repo-header-action=""
-                              className="size-5 shrink-0 rounded-md text-muted-foreground can-hover:opacity-0 transition-opacity hover:bg-accent/70 hover:text-foreground focus:opacity-100 group-hover:opacity-100"
-                              aria-label={
-                                createState?.ariaLabel ??
-                                translate(
-                                  'auto.components.sidebar.WorktreeList.bb85cd86ba',
-                                  'Create workspace for {{value0}}',
-                                  { value0: row.label }
-                                )
-                              }
+                              className={cn(
+                                REPO_HEADER_ACTION_BUTTON_CLASS,
+                                folderWorkspaceCreateDisabled &&
+                                  'cursor-not-allowed text-muted-foreground/60 hover:bg-transparent hover:text-muted-foreground/60'
+                              )}
+                              aria-label={translate(
+                                'auto.components.sidebar.WorktreeList.bd37a57ac8',
+                                'Create workspace for {{value0}}',
+                                { value0: row.label }
+                              )}
+                              aria-disabled={folderWorkspaceCreateDisabled}
                               onKeyDown={stopRepoHeaderKeyboardToggle}
+                              onPointerDown={handleRepoHeaderActionPointerDown}
                               onClick={(event) => {
                                 event.preventDefault()
                                 event.stopPropagation()
-                                if (row.repo) {
-                                  handleCreateForRepo(row.repo.id)
+                                if (folderWorkspaceCreateDisabled) {
+                                  return
+                                }
+                                if (
+                                  row.projectGroup &&
+                                  'parentPath' in row.projectGroup &&
+                                  row.projectGroup.parentPath
+                                ) {
+                                  handleCreateFolderWorkspace(row.projectGroup)
                                 }
                               }}
                             >
                               <Plus className="size-3" />
                             </Button>
-                          )}
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" sideOffset={6}>
-                          {createState?.tooltip ??
-                            translate(
-                              'auto.components.sidebar.WorktreeList.bb85cd86ba',
-                              'Create workspace for {{value0}}',
-                              { value0: row.label }
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" sideOffset={6}>
+                            {projectGroupPathStatus?.exists === false
+                              ? getFolderWorkspacePathStatusDescription(projectGroupPathStatus)
+                              : translate(
+                                  'auto.components.sidebar.WorktreeList.bd37a57ac8',
+                                  'Create workspace for {{value0}}',
+                                  { value0: row.label }
+                                )}
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : null}
+
+                      {row.repo && groupBy === 'repo' ? (
+                        <DropdownMenu modal={false}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-xs"
+                                  className={REPO_HEADER_ACTION_BUTTON_CLASS}
+                                  data-repo-header-action=""
+                                  aria-label={translate(
+                                    'auto.components.sidebar.WorktreeList.609633a9e6',
+                                    'Project actions for {{value0}}',
+                                    { value0: row.label }
+                                  )}
+                                  onClick={(event) => event.stopPropagation()}
+                                  onKeyDown={stopRepoHeaderKeyboardToggle}
+                                  onPointerDown={handleRepoHeaderActionPointerDown}
+                                >
+                                  <Ellipsis className="size-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" sideOffset={6}>
+                              {translate(
+                                'auto.components.sidebar.WorktreeList.2ef41bf9a7',
+                                'Project actions'
+                              )}
+                            </TooltipContent>
+                          </Tooltip>
+                          <DropdownMenuContent
+                            align="end"
+                            side="bottom"
+                            sideOffset={6}
+                            // Why: Radix portals preserve React bubbling through
+                            // the project header. Keep menu interactions from
+                            // arming row drag/collapse handlers behind it.
+                            onPointerDown={stopRepoHeaderMenuEvent}
+                            onMouseDown={stopRepoHeaderMenuEvent}
+                            onPointerUp={stopRepoHeaderMenuEvent}
+                            onMouseUp={stopRepoHeaderMenuEvent}
+                            onClick={stopRepoHeaderMenuEvent}
+                            onKeyDown={stopRepoHeaderMenuEvent}
+                          >
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                if (row.repo) {
+                                  handleOpenRepoSettings(row.repo.id)
+                                }
+                              }}
+                            >
+                              <SlidersHorizontal className="size-3.5" />
+                              {translate(
+                                'auto.components.sidebar.WorktreeList.2cdffbc728',
+                                'Project Settings'
+                              )}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                if (row.repo) {
+                                  handleOpenRepoSettings(
+                                    row.repo.id,
+                                    getRepositoryIconSectionId(row.repo.id)
+                                  )
+                                }
+                              }}
+                            >
+                              <Shapes className="size-3.5" />
+                              {translate(
+                                'auto.components.sidebar.WorktreeList.e82d3589a1',
+                                'Change Project Icon'
+                              )}
+                            </DropdownMenuItem>
+                            {row.repo && isGitRepoKind(row.repo) ? (
+                              <DropdownMenuItem
+                                onSelect={() => {
+                                  if (row.repo) {
+                                    handleOpenWorktreeVisibility(row.repo.id)
+                                  }
+                                }}
+                              >
+                                <Eye className="size-3.5" />
+                                {getWorktreeVisibilityMenuLabel(row.repo)}
+                              </DropdownMenuItem>
+                            ) : null}
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                if (row.repo) {
+                                  handleCreateGroupFromRepo(row.repo)
+                                }
+                              }}
+                            >
+                              <FolderPlus className="size-3.5" />
+                              {translate(
+                                'auto.components.sidebar.WorktreeList.cbfd565f83',
+                                'New group from project'
+                              )}
+                            </DropdownMenuItem>
+                            {projectGroups.length > 0 ? (
+                              <DropdownMenuSub>
+                                <DropdownMenuSubTrigger>
+                                  <FolderInput className="size-3.5" />
+                                  {translate(
+                                    'auto.components.sidebar.WorktreeList.4a08fb55f2',
+                                    'Move to group'
+                                  )}
+                                </DropdownMenuSubTrigger>
+                                <DropdownMenuSubContent>
+                                  {projectGroups.map((group) => (
+                                    <DropdownMenuItem
+                                      key={group.id}
+                                      disabled={row.repo?.projectGroupId === group.id}
+                                      onSelect={() => {
+                                        if (row.repo) {
+                                          handleMoveProjectToGroup(row.repo, group.id)
+                                        }
+                                      }}
+                                    >
+                                      <span className="max-w-48 truncate">{group.name}</span>
+                                    </DropdownMenuItem>
+                                  ))}
+                                </DropdownMenuSubContent>
+                              </DropdownMenuSub>
+                            ) : null}
+                            {row.repo.projectGroupId ? (
+                              <DropdownMenuItem
+                                onSelect={() => {
+                                  if (row.repo) {
+                                    handleRemoveProjectFromGroup(row.repo)
+                                  }
+                                }}
+                              >
+                                <CircleX className="size-3.5" />
+                                {translate(
+                                  'auto.components.sidebar.WorktreeList.64e55f7f01',
+                                  'Remove from group'
+                                )}
+                              </DropdownMenuItem>
+                            ) : null}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onSelect={() => {
+                                if (row.repo) {
+                                  handleRemoveProject(row.repo)
+                                }
+                              }}
+                            >
+                              <Trash2 className="size-3.5" />
+                              {translate(
+                                'auto.components.sidebar.WorktreeList.c83968f87f',
+                                'Remove Project'
+                              )}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : null}
+
+                      {row.repo && groupBy === 'repo' ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            {createState?.disabled ? (
+                              <span
+                                className={cn(
+                                  'inline-flex cursor-not-allowed transition-[margin,max-width,opacity]',
+                                  REPO_HEADER_ACTION_REVEAL_CLASS
+                                )}
+                                data-repo-header-action=""
+                                tabIndex={0}
+                                aria-label={createState.ariaLabel}
+                                onKeyDown={stopRepoHeaderKeyboardToggle}
+                                onClick={(event) => event.stopPropagation()}
+                                onPointerDown={handleRepoHeaderActionPointerDown}
+                              >
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-xs"
+                                  className="pointer-events-none size-5 shrink-0 rounded-md text-muted-foreground transition-opacity opacity-60"
+                                  aria-label={createState.ariaLabel}
+                                  disabled
+                                >
+                                  <Plus className="size-3" />
+                                </Button>
+                              </span>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                className={REPO_HEADER_ACTION_BUTTON_CLASS}
+                                data-repo-header-action=""
+                                aria-label={
+                                  createState?.ariaLabel ??
+                                  translate(
+                                    'auto.components.sidebar.WorktreeList.bb85cd86ba',
+                                    'Create workspace for {{value0}}',
+                                    { value0: row.label }
+                                  )
+                                }
+                                onKeyDown={stopRepoHeaderKeyboardToggle}
+                                onClick={(event) => {
+                                  event.preventDefault()
+                                  event.stopPropagation()
+                                  if (row.repo) {
+                                    handleCreateForRepo(row.repo.id)
+                                  }
+                                }}
+                              >
+                                <Plus className="size-3" />
+                              </Button>
                             )}
-                        </TooltipContent>
-                      </Tooltip>
-                    ) : null}
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" sideOffset={6}>
+                            {createState?.tooltip ??
+                              translate(
+                                'auto.components.sidebar.WorktreeList.bb85cd86ba',
+                                'Create workspace for {{value0}}',
+                                { value0: row.label }
+                              )}
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : null}
+                    </ProjectHeaderActions>
                   </div>
                 </div>
               )
@@ -3952,20 +4102,23 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
               forceActiveSurface = false
             ) => {
               const lineageToggleGroupKey = itemRow.lineageGroupKey
-              // Why: child card rows own lineage depth, while WorktreeCard
-              // still owns the project/group inset inside each card surface.
+              const experimentalNewWorktreeCardStyle =
+                settings?.experimentalNewWorktreeCardStyle === true
+              // Why: experimental in-card lineage inherits the parent surface;
+              // legacy cards keep the old depth-based nested row geometry.
               const paddingDepth = nested ? Math.max(0, itemRow.depth - 1) : itemRow.depth
-              const nestedCardPaddingLeft = nested
-                ? getWorktreeCardSurfaceInset({
-                    isGrouped: true,
-                    groupDepth: itemRow.depth
-                  })
-                : 0
               const inheritedCardContentIndent = getWorktreeCardContentIndent({
                 isGrouped: groupBy !== 'none',
                 groupDepth: itemRow.groupDepth,
                 lineageDepth: 0
               })
+              const nestedLineageGeometry = nested
+                ? getLineageNestedRowGeometry({
+                    experimentalNewWorktreeCardStyle,
+                    inheritedCardContentIndent,
+                    lineageDepth: itemRow.depth
+                  })
+                : null
               // Why: grouped rows inherit their project/group header depth,
               // while the card surface still spans the full hit/background row.
               const paddingLeft = getWorktreeCardContentIndent({
@@ -3974,19 +4127,29 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                 lineageDepth: paddingDepth
               })
               const surfaceInset = nested
-                ? nestedCardPaddingLeft
+                ? nestedLineageGeometry!.surfaceInset
                 : getWorktreeCardSurfaceInset({
                     isGrouped: groupBy !== 'none',
                     groupDepth: itemRow.groupDepth
                   })
-              const cardContentIndent = Math.max(
-                0,
-                (nested ? inheritedCardContentIndent : paddingLeft) - surfaceInset
-              )
+              const cardContentIndent = nested
+                ? nestedLineageGeometry!.cardContentIndent
+                : Math.max(0, paddingLeft - surfaceInset)
+              const lineageChildrenStyle = lineageChildren
+                ? getLineageChildrenInlineStyle(
+                    nestedLineageGeometry?.lineageChildrenInlineOffset ??
+                      LINEAGE_CHILDREN_INLINE_OFFSET
+                  )
+                : undefined
               const worktreeDragGroupKey = groupKeyByRowKey.get(itemRow.rowKey)
               const worktreeDragGroupIndex = groupIndexByRowKey.get(itemRow.rowKey)
               const revealHighlightTone =
                 agentSendTargetWorktreeId === itemRow.worktree.id ? 'ai' : 'default'
+              const isLineageDropTarget =
+                worktreeDragState.draggingWorktreeId &&
+                (worktreePointerDragRef.current?.latestStatusDropTarget?.target.lineageParentId ===
+                  itemRow.worktree.id ||
+                  nativeLineageDropTargetId === itemRow.worktree.id)
               const isPinnedOverlayRow = itemRow.sectionKey === PINNED_GROUP_KEY
               const isActiveWorktree = activeWorktreeId === itemRow.worktree.id
               const activeSurfaceVariant = getActiveSurfaceVariant(itemRow)
@@ -4046,6 +4209,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                     revealHighlightTone={revealHighlightTone}
                     selectedWorktrees={selectedWorktrees}
                     nativeDragEnabled={false}
+                    isLineageDropTarget={Boolean(isLineageDropTarget)}
                     contentIndent={cardContentIndent}
                     flushSurface
                     activationRowKey={itemRow.rowKey}
@@ -4063,6 +4227,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                     lineageChildCount={itemRow.lineageChildCount}
                     lineageCollapsed={itemRow.lineageCollapsed}
                     lineageChildren={lineageChildren}
+                    lineageChildrenStyle={lineageChildrenStyle}
                     onLineageToggle={
                       lineageToggleGroupKey
                         ? (event) => {
@@ -4359,6 +4524,7 @@ const WorktreeList = React.memo(function WorktreeList({
   const projectOrderBy = useAppStore((s) => s.projectOrderBy)
   const showSleepingWorkspaces = useAppStore((s) => s.showSleepingWorkspaces)
   const hideDefaultBranchWorkspace = useAppStore((s) => s.hideDefaultBranchWorkspace)
+  const hideAutomationGeneratedWorkspaces = useAppStore((s) => s.hideAutomationGeneratedWorkspaces)
   const filterRepoIds = useAppStore((s) => s.filterRepoIds)
   const openModal = useAppStore((s) => s.openModal)
   const openSettingsPage = useAppStore((s) => s.openSettingsPage)
@@ -4388,6 +4554,9 @@ const WorktreeList = React.memo(function WorktreeList({
   const agentTargetTerminalLayoutsByTabId = useAppStore((s) =>
     agentSendPopoverTargetMode ? s.terminalLayoutsByTabId : EMPTY_TERMINAL_LAYOUTS_BY_TAB_ID
   )
+  const agentTargetPtyIdsByTabId = useAppStore((s) =>
+    agentSendPopoverTargetMode ? s.ptyIdsByTabId : EMPTY_PTY_IDS_BY_TAB_ID
+  )
   const agentSendTargetWorktreeId = useMemo(() => {
     void agentTargetStatusEpoch
     if (!agentSendPopoverTargetMode) {
@@ -4397,7 +4566,8 @@ const WorktreeList = React.memo(function WorktreeList({
       {
         agentStatusByPaneKey: agentTargetStatusByPaneKey,
         tabsByWorktree: agentTargetTabsByWorktree,
-        terminalLayoutsByTabId: agentTargetTerminalLayoutsByTabId
+        terminalLayoutsByTabId: agentTargetTerminalLayoutsByTabId,
+        ptyIdsByTabId: agentTargetPtyIdsByTabId
       },
       agentSendPopoverTargetMode.worktreeId
     )
@@ -4411,7 +4581,8 @@ const WorktreeList = React.memo(function WorktreeList({
     agentSendPopoverTargetMode,
     agentTargetStatusByPaneKey,
     agentTargetTabsByWorktree,
-    agentTargetTerminalLayoutsByTabId
+    agentTargetTerminalLayoutsByTabId,
+    agentTargetPtyIdsByTabId
   ])
 
   // Read tabsByWorktree when needed for filtering or sorting
@@ -4426,10 +4597,15 @@ const WorktreeList = React.memo(function WorktreeList({
 
   const cardProps = useAppStore((s) => s.worktreeCardProperties)
 
-  // PR cache is needed for PR-status grouping and when the PR card property
-  // is visible.
+  // PR cache is needed for PR-status grouping and when the status lane can
+  // show PR state on quiet/done workspace cards.
   const prCache = useAppStore((s) =>
-    groupBy === 'pr-status' || cardProps.includes('pr') ? s.prCache : null
+    groupBy === 'pr-status' ||
+    (s.settings?.experimentalNewWorktreeCardStyle === true
+      ? cardProps.includes('status')
+      : cardProps.includes('pr'))
+      ? s.prCache
+      : null
   )
   const settings = useAppStore((s) => s.settings)
   const sshTargetLabels = useAppStore((s) => s.sshTargetLabels)
@@ -4695,6 +4871,7 @@ const WorktreeList = React.memo(function WorktreeList({
       ptyIdsByTabId,
       browserTabsByWorktree,
       hideDefaultBranchWorkspace,
+      hideAutomationGeneratedWorkspaces,
       repoMap,
       workspaceHostScope,
       visibleWorkspaceHostIds,
@@ -4717,6 +4894,7 @@ const WorktreeList = React.memo(function WorktreeList({
     filterRepoIds,
     showSleepingWorkspaces,
     hideDefaultBranchWorkspace,
+    hideAutomationGeneratedWorkspaces,
     workspaceHostScope,
     visibleWorkspaceHostIds,
     settings,
@@ -5551,13 +5729,23 @@ const WorktreeList = React.memo(function WorktreeList({
       showSleepingWorkspaces,
       filterRepoIds,
       hideDefaultBranchWorkspace,
+      hideAutomationGeneratedWorkspaces,
       visibleWorkspaceHostIds
     }),
-    [showSleepingWorkspaces, filterRepoIds, hideDefaultBranchWorkspace, visibleWorkspaceHostIds]
+    [
+      showSleepingWorkspaces,
+      filterRepoIds,
+      hideDefaultBranchWorkspace,
+      hideAutomationGeneratedWorkspaces,
+      visibleWorkspaceHostIds
+    ]
   )
   const hasFilters = sidebarHasActiveFilters(filterState)
   const setShowSleepingWorkspaces = useAppStore((s) => s.setShowSleepingWorkspaces)
   const setHideDefaultBranchWorkspace = useAppStore((s) => s.setHideDefaultBranchWorkspace)
+  const setHideAutomationGeneratedWorkspaces = useAppStore(
+    (s) => s.setHideAutomationGeneratedWorkspaces
+  )
   const setFilterRepoIds = useAppStore((s) => s.setFilterRepoIds)
   const setVisibleWorkspaceHostIds = useAppStore((s) => s.setVisibleWorkspaceHostIds)
 
@@ -5572,6 +5760,9 @@ const WorktreeList = React.memo(function WorktreeList({
     if (actions.resetHideDefaultBranchWorkspace) {
       setHideDefaultBranchWorkspace(false)
     }
+    if (actions.resetHideAutomationGeneratedWorkspaces) {
+      setHideAutomationGeneratedWorkspaces(false)
+    }
     if (actions.resetVisibleWorkspaceHostIds) {
       setVisibleWorkspaceHostIds(null)
     }
@@ -5579,6 +5770,7 @@ const WorktreeList = React.memo(function WorktreeList({
     setShowSleepingWorkspaces,
     setFilterRepoIds,
     setHideDefaultBranchWorkspace,
+    setHideAutomationGeneratedWorkspaces,
     setVisibleWorkspaceHostIds,
     filterState
   ])
