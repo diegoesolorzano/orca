@@ -625,7 +625,11 @@
       "CodexRestartChip": {
         "9132779820": "Despedir",
         "c72a5fb234": "Reanudar",
-        "9263e75f49": "Codex está usando la cuenta anterior."
+        "9263e75f49": "Codex está usando la cuenta anterior.",
+        "a4c8e1b2f7": "Codex is still signed in as {{value0}}",
+        "d3e8a1f4b2": "Account switched",
+        "e9b2c7d1a5": "Restart this session to use {{value0}}. Collapse to keep working with the current account.",
+        "f1a6c8e3b4": "Collapse"
       },
       "FirstLaunchBanner": {
         "b9e1b966c7": "Descartar aviso",
@@ -2303,7 +2307,7 @@
           "TerminalContextMenu": {
             "b4cdd9314e": "Borrar pantalla",
             "8c17d6786d": "Cerrar panel",
-            "copyTerminalId": "Copiar ID de terminal",
+            "copyTerminalId": "Copy Terminal ID",
             "2cf85a6a55": "Copiar ID del panel",
             "39809d152f": "Establecer título…",
             "06c2b0f043": "Igualar tamaños de paneles",
@@ -2318,8 +2322,7 @@
             "f3eeb1de13": "Copiar",
             "c2f0b72b8d": "Insertar",
             "925f49f210": "Expandir panel",
-            "df766809e0": "Contraer panel",
-            "copyTerminalId": "Copy Terminal ID"
+            "df766809e0": "Contraer panel"
           },
           "TerminalErrorToast": {
             "e4aa243f8c": "Reiniciar demonio",
@@ -2908,7 +2911,11 @@
             "e740f92596": "Error al actualizar",
             "8418ec448d": "No se pudo actualizar el uso de {{value0}}. Es posible que las sesiones de agente sigan iniciadas.",
             "45198c7d95": "1 rate-limit reset available",
-            "bce421cba3": "{{value0}} rate-limit resets available"
+            "bce421cba3": "{{value0}} rate-limit resets available",
+            "7ec6e030a0": "Next expires now",
+            "d1e442a9e5": "Expires now",
+            "6cf9eaed10": "Next expires in {{value0}}",
+            "20ad66aed1": "Expires in {{value0}}"
           },
           "SshTargetStatusRow": {
             "sshHost": "SSH Host"
@@ -3856,7 +3863,8 @@
           "697d0f6e1b": "Desprender",
           "250de158fd": "Remove Workspace",
           "changeParentWorkspace": "Cambiar árbol de trabajo padre...",
-          "setParentWorkspace": "Establecer árbol de trabajo padre..."
+          "setParentWorkspace": "Establecer árbol de trabajo padre...",
+          "workspaceSection": "Espacio de trabajo"
         },
         "WorktreeList": {
           "d880ea0744": "Crea un grupo y mueve este proyecto a él.",
@@ -4798,7 +4806,7 @@
           "dd6f0a1d45": "Mascota",
           "0e89a574ae": "Mascota animada flotante en la esquina inferior derecha.",
           "agentHibernation": {
-            "copy": "Detiene los terminales de agentes en segundo plano que estén inactivos después del intervalo configurado y reanuda las sesiones compatibles cuando las vuelves a abrir. Experimental mientras ajustamos el modelo de seguridad.",
+            "copy": "Detiene los terminales de agentes en segundo plano que estén inactivos después del intervalo configurado y reanuda las sesiones compatibles cuando las vuelves a abrir. La suspensión de agentes conserva las opciones de inicio de los agentes iniciados por Orca. Los agentes iniciados manualmente pueden reanudarse con tus valores predeterminados actuales de Orca. Experimental mientras ajustamos el modelo de seguridad.",
             "description": "Detiene los terminales de agentes en segundo plano que estén inactivos después del intervalo configurado y reanuda las sesiones compatibles cuando las vuelves a abrir.",
             "idleMinutesDescription": "Cuántos minutos inactivo debe esperar un agente en segundo plano completado antes de que Orca pueda suspenderlo.",
             "idleMinutesLabel": "Suspender después de",
@@ -4995,7 +5003,12 @@
           "f35007e6e8": "nombre de usuario git",
           "3d172725cc": "Ninguno",
           "1f32ba27a6": "Costumbre",
-          "a182c5125e": "Nombre de usuario"
+          "a182c5125e": "Nombre de usuario",
+          "sourceControlGroupOrderTitle": "Orden de grupos de control de código fuente",
+          "sourceControlGroupOrderDescription": "Elige si Cambios, Cambios preparados o Archivos sin seguimiento aparecen primero en Control de código fuente.",
+          "changesFirst": "Cambios primero",
+          "stagedFirst": "Cambios preparados primero",
+          "untrackedFirst": "Archivos sin seguimiento primero"
         },
         "HiddenExperimentalGroup": {
           "d0f914a528": "Alternar marcador de posición",
@@ -5599,7 +5612,11 @@
           "bea897eec2": "En",
           "62511a575d": "Usar global",
           "30ae6dcce8": "El valor predeterminado global es",
-          "cf5959c834": "Control de fuente AI habilitado"
+          "cf5959c834": "Control de fuente AI habilitado",
+          "show": "Mostrar",
+          "hide": "Ocultar",
+          "showActionsLabel": "Mostrar acciones de IA de control de código fuente",
+          "visibilityHelper": "Controla si los botones de IA de control de código fuente se muestran para este repositorio. La generación usada por funciones separadas sigue la configuración de esas funciones. El valor predeterminado global es {{value0}}."
         },
         "RepositorySourceControlAiHostedReviewDefaults": {
           "053ccfbf52": "Apagado",
@@ -6863,7 +6880,7 @@
             "agentHibernation": {
               "agent": "agente",
               "agents": "agentes",
-              "description": "Detiene los terminales de agentes en segundo plano que estén inactivos después del intervalo configurado y reanuda las sesiones compatibles cuando se vuelven a abrir.",
+              "description": "Detiene los terminales de agentes en segundo plano que estén inactivos después del intervalo configurado y reanuda las sesiones compatibles cuando se vuelven a abrir. La suspensión de agentes conserva las opciones de inicio de los agentes iniciados por Orca; los agentes iniciados manualmente pueden reanudarse con los valores predeterminados actuales de Orca.",
               "minutes": "minutos",
               "sleep": "suspender",
               "terminal": "terminal",
@@ -7084,7 +7101,15 @@
             "1d2fae1fa2": "nombre de usuario git",
             "f83c8937c4": "denominación de sucursales",
             "5ecd91c5ef": "Prefijo agregado a los nombres de las ramas al crear árboles de trabajo.",
-            "68bd65fdb8": "Prefijo de rama"
+            "68bd65fdb8": "Prefijo de rama",
+            "sourceControlGroupOrderTitle": "Orden de grupos de control de código fuente",
+            "sourceControlGroupOrderDescription": "Elige si Cambios, Cambios preparados o Archivos sin seguimiento aparecen primero en Control de código fuente.",
+            "groupOrder": "orden de grupos",
+            "changesFirst": "cambios primero",
+            "stagedFirst": "cambios preparados primero",
+            "untrackedFirst": "sin seguimiento primero",
+            "sourceControl": "control de código fuente",
+            "gitChanges": "cambios de git"
           }
         },
         "input": {
@@ -8445,6 +8470,7 @@
           },
           "SourceControl": {
             "1406954883": "Borrar todas las notas...",
+            "conflictsSection": "Conflictos",
             "cc05b2d088": "Abrir en el Explorador de archivos",
             "03194cfff4": "Estado de la sesión local derivado de un conflicto que abrió aquí.",
             "413a3ba113": "conflicto",
@@ -8769,6 +8795,11 @@
                 "066fedd446": "Trabajos fallidos",
                 "ae8a04ef17": "Los detalles del archivo de conflicto no están disponibles",
                 "73d0675356": "Detalles refrescantes del conflicto...",
+                "f5bc5c4cf1": "The hosting provider reports conflicts, but local Git did not reproduce them. Refresh the review or push the branch to recalculate mergeability.",
+                "5bc9bda2af": "Run from this worktree",
+                "e87fb3d929": "Copy mergeability refresh commands",
+                "1e53e45072": "Copied",
+                "084c516efb": "Copy commands",
                 "5dc3af25c0": "Seleccionar comentario",
                 "d7a2f9c401": "Send unresolved {{value0}} comments",
                 "d91f2a6c39": "Enviar {{value0}} comentarios en cola",
@@ -8903,7 +8934,8 @@
                   "9e779995dd": "Crear {{value0}}",
                   "226b85a3a7": "Buscar",
                   "323bb614aa": "Commit y sincronizar",
-                  "2b8e6595fd": "Commit"
+                  "2b8e6595fd": "Commit",
+                  "04d709801d": "Fetch from remote without merging"
                 }
               },
               "primary": {
@@ -9079,7 +9111,16 @@
             "daysAgo": "{{value0}}d ago",
             "monthsAgo": "{{value0}}mo ago",
             "yearsAgo": "{{value0}}y ago",
-            "sessionId": "ID de sesión"
+            "sessionId": "ID de sesión",
+            "originalAsk": "Original ask",
+            "latestTurns": "Latest turns",
+            "noPreviewAvailable": "No conversation preview available",
+            "messageCount": "{{value0}} msgs",
+            "userRole": "You",
+            "agentRole": "Agent",
+            "toolRole": "Tool",
+            "systemRole": "System",
+            "sessionRole": "Session"
           },
           "AiVaultSessionRow": {
             "resumeAgentSession": "Resume {{value0}} session",
@@ -9096,7 +9137,14 @@
             "hideDetails": "Ocultar detalles",
             "showDetails": "Mostrar detalles",
             "moreSessionActions": "Más acciones de sesión",
-            "moreActions": "Más acciones"
+            "moreActions": "Más acciones",
+            "noPreviewAvailable": "No conversation preview available",
+            "dragToResume": "Drag to resume in a new tab",
+            "userRole": "You",
+            "agentRole": "Agent",
+            "toolRole": "Tool",
+            "systemRole": "System",
+            "sessionRole": "Session"
           },
           "FileExplorerNameFilter": {
             "26fb73c6e3": "Buscar archivos",
@@ -9140,9 +9188,6 @@
                 "copyCommand": "Copy command"
               }
             }
-          },
-          "SourceControlEntryContextMenu": {
-            "a1f2c8d901": "View"
           }
         }
       },
@@ -11044,7 +11089,16 @@
             "ea6af700da": "{{value0}} anotación",
             "c13693fe27": "{{value0}} anotaciones",
             "074f0ed10b": "{{value0}} anotación lista. Seleccione otro elemento o copie todos los comentarios.",
-            "a2164a6e5a": "{{value0}} anotaciones listas. Seleccione otro elemento o copie todos los comentarios."
+            "a2164a6e5a": "{{value0}} anotaciones listas. Seleccione otro elemento o copie todos los comentarios.",
+            "9f6f2e8c19": "The downloaded file path is unavailable.",
+            "0c79b7634d": "Could not open the downloaded file. It may have been moved or deleted.",
+            "397d9dc923": "Could not show the downloaded file. It may have been moved or deleted.",
+            "39c04fed61": "Downloading paused",
+            "5c3d530a68": "Downloaded",
+            "4bb7424d6b": "Canceled",
+            "6e776f9ef9": "Download failed",
+            "756bfc25c9": "Open",
+            "09a9489aa5": "Show"
           },
           "BrowserToolbarMenu": {
             "429ef481f9": "Cancelar",
