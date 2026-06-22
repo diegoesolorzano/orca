@@ -271,6 +271,16 @@ export const TUI_AGENT_CONFIG: Record<TuiAgent, TuiAgentConfig> = {
     promptInjectionMode: 'argv',
     draftPromptFlag: '--prefill'
   },
+  zai: {
+    // Why (fork): `zai` is a wrapper that runs Claude Code against the z.ai/GLM
+    // backend via `exec -a zai claude`, so the foreground process is `zai` and
+    // the prompt-injection surface is Claude's — it supports `--prefill`.
+    detectCmd: 'zai',
+    launchCmd: 'zai',
+    expectedProcess: 'zai',
+    promptInjectionMode: 'argv',
+    draftPromptFlag: '--prefill'
+  },
   'mistral-vibe': {
     // Why: Mistral's installer and PyPI package expose `vibe` even though the
     // package/project name is mistral-vibe. Keep the old name as an alias for

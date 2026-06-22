@@ -38,20 +38,22 @@ Tests: `src/main/git/worktree-git-crypt.test.ts` (6 casos).
 Limitacion conocida: solo path local; el relay SSH (`src/relay/git-handler-worktree-ops.ts`)
 quedo sin cambios porque solo dispone de un ejecutor `git` (sin file ops remotas).
 
-## Parche de producto: agente `minimax` (y wrapper `kimi`)
+## Parche de producto: agentes `minimax` / `zai` (y wrapper `kimi`)
 
-Reconocimiento en Orca de dos "agentes" que en realidad son **Claude Code apuntando a
+Reconocimiento en Orca de "agentes" que en realidad son **Claude Code apuntando a
 otro backend** vía wrappers en `~/.local/bin`:
 
-- `kimi`   → `exec -a kimi claude`     (backend api.kimi.com)
-- `minimax`→ `exec -a minimax claude`  (backend api.minimax.io, modelo MiniMax-M3)
+- `kimi`    → `exec -a kimi claude`     (backend api.kimi.com)
+- `minimax` → `exec -a minimax claude`  (backend api.minimax.io, modelo MiniMax-M3)
+- `zai`     → `exec -a zai claude`      (backend api.z.ai, modelo GLM)
 
 Clave: Orca reconoce el agente por el **nombre del proceso en foreground**
 (`getForegroundProcess` → `recognizeAgentProcess`). `exec -a <nombre>` fija `argv[0]`,
-así el proceso se llama `kimi`/`minimax` en vez de `claude` y Orca los distingue.
+así el proceso se llama `kimi`/`minimax`/`zai` en vez de `claude` y Orca los distingue.
 
 - `kimi` ya existe en el catálogo upstream (`TUI_AGENT_CONFIG.kimi`) — no requirió código.
-- `minimax` es parche del fork. Archivos tocados (replican el patrón de `kimi`):
+- `minimax` y `zai` son parche del fork. Para agregar OTRO wrapper igual, replica el
+  patrón en estos archivos (el typecheck caza los `Record<TuiAgent>` exhaustivos que falten):
   `src/shared/types.ts` (union `TuiAgent`), `src/shared/tui-agent-config.ts`
   (`promptInjectionMode:'argv'` + `--prefill`, porque por debajo ES Claude Code),
   `src/shared/agent-kind.ts`, `src/shared/telemetry-events.ts` (`AGENT_KIND_VALUES`),

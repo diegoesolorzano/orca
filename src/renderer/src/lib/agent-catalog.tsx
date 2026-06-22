@@ -245,6 +245,15 @@ export const getAgentCatalog = createLocalizedCatalog((): AgentCatalogEntry[] =>
     homepageUrl: 'https://www.minimax.io/'
   },
   {
+    // Why (fork): Z.ai / GLM = Claude Code on the z.ai backend, launched via the
+    // `zai` wrapper (`exec -a zai claude`). Detected by process name.
+    id: 'zai',
+    label: 'Z.ai',
+    cmd: 'zai',
+    faviconDomain: 'z.ai',
+    homepageUrl: 'https://z.ai/'
+  },
+  {
     id: 'mistral-vibe',
     label: translate('auto.lib.agent.catalog.ca73055bd0', 'Mistral Vibe'),
     // Why: `uv tool install mistral-vibe` exposes the interactive CLI as

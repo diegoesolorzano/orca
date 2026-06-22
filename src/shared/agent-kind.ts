@@ -39,6 +39,7 @@ const TUI_AGENT_KIND_BY_AGENT = {
   droid: 'droid',
   kimi: 'kimi',
   minimax: 'minimax',
+  zai: 'zai',
   'mistral-vibe': 'mistral-vibe',
   'qwen-code': 'qwen-code',
   rovo: 'rovo',

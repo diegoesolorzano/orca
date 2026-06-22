@@ -2242,6 +2242,7 @@ export type TuiAgent =
   | 'droid' // Factory Droid
   | 'kimi' // Kimi
   | 'minimax' // MiniMax (Claude Code on MiniMax backend — fork)
+  | 'zai' // Z.ai / GLM (Claude Code on z.ai backend — fork)
   | 'mistral-vibe' // Mistral Vibe
   | 'qwen-code' // Qwen Code
   | 'rovo' // Rovo Dev

@@ -94,6 +94,7 @@ export const AGENT_KIND_VALUES = [
   'droid',
   'kimi',
   'minimax',
+  'zai',
   'mistral-vibe',
   'qwen-code',
   'rovo',

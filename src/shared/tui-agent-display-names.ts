@@ -33,6 +33,7 @@ export const TUI_AGENT_DISPLAY_NAMES: Record<TuiAgent, string> = {
   droid: 'Droid',
   kimi: 'Kimi',
   minimax: 'MiniMax',
+  zai: 'Z.ai',
   'mistral-vibe': 'Mistral Vibe',
   'qwen-code': 'Qwen Code',
   rovo: 'Rovo Dev',
