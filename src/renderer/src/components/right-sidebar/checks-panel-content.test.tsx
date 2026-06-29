@@ -273,9 +273,39 @@ describe('PRCommentsList', () => {
     expect(markup.indexOf('aria-label="Add comment"')).toBeLessThan(
       markup.indexOf('Existing review context')
     )
+    expect(markup.indexOf('aria-label="Comment display options"')).toBeLessThan(
+      markup.indexOf('aria-label="Add comment"')
+    )
     expect(markup).toContain('lucide-plus')
     expect(markup).not.toContain('Add a comment...')
     expect(markup).not.toContain('Add a PR comment')
+  })
+
+  it('shows resolve on open review threads', () => {
+    const comments: PRComment[] = [
+      {
+        id: 2,
+        author: 'alice',
+        authorAvatarUrl: '',
+        body: 'Please address this before merge.',
+        createdAt: '2026-05-14T00:00:00Z',
+        url: 'https://github.com/acme/widgets/pull/42#discussion_r2',
+        threadId: 'thread-open',
+        path: 'src/a.ts',
+        isResolved: false
+      }
+    ]
+
+    const markup = renderWithTooltips(
+      React.createElement(PRCommentsList, {
+        comments,
+        commentsLoading: false,
+        onResolve: () => true
+      })
+    )
+
+    expect(markup).toContain('Resolve')
+    expect(markup).not.toContain('Unresolve')
   })
 
   it('renders a more-actions menu on conversation comments', () => {
@@ -347,8 +377,20 @@ describe('CheckJobLogTail', () => {
       })
     )
 
-    expect(markup).toContain('Log tail (last 200 lines)')
+    expect(markup).toContain('Log excerpt')
     expect(markup).toContain('Error: expected true to be false')
-    expect(markup).toContain('Copy log tail')
+    expect(markup).toContain('Copy log excerpt')
+  })
+
+  it('uses a taller viewport when expanded for failed-job details', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(CheckJobLogTail, {
+        logTail: 'Error: expected true to be false',
+        expanded: true
+      })
+    )
+
+    expect(markup).toContain('min-h-48')
+    expect(markup).toContain('max-h-[min(50vh,32rem)]')
   })
 })

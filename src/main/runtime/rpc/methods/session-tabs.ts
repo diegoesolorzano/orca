@@ -28,7 +28,9 @@ export const SESSION_TAB_METHODS: RpcAnyMethod[] = [
     name: 'session.tabs.activate',
     params: ActivateTab,
     handler: async (params, { runtime }) =>
-      runtime.activateMobileSessionTab(params.worktree, params.tabId, params.leafId)
+      runtime.activateMobileSessionTab(params.worktree, params.tabId, params.leafId, {
+        notifyClients: params.notifyClients !== false
+      })
   }),
   defineMethod({
     name: 'session.tabs.close',
@@ -50,7 +52,8 @@ export const SESSION_TAB_METHODS: RpcAnyMethod[] = [
         ...(params.launchConfig ? { launchConfig: params.launchConfig } : {}),
         ...(params.launchToken ? { launchToken: params.launchToken } : {}),
         ...(params.launchAgent ? { launchAgent: params.launchAgent } : {}),
-        activate: params.activate
+        activate: params.activate,
+        clientMutationId: params.clientMutationId
       })
   }),
   defineMethod({
@@ -100,7 +103,8 @@ export const SESSION_TAB_METHODS: RpcAnyMethod[] = [
       runtime.setMobileSessionTabProps(params.worktree, {
         tabId: params.tabId,
         ...(params.color !== undefined ? { color: params.color } : {}),
-        ...(params.isPinned !== undefined ? { isPinned: params.isPinned } : {})
+        ...(params.isPinned !== undefined ? { isPinned: params.isPinned } : {}),
+        ...(params.viewMode !== undefined ? { viewMode: params.viewMode } : {})
       })
   }),
   defineStreamingMethod({

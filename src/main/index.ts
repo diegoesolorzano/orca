@@ -8,7 +8,12 @@ import os from 'node:os'
 import { app, BrowserWindow, ipcMain, nativeTheme } from 'electron'
 import { electronApp, is } from '@electron-toolkit/utils'
 import * as QRCode from 'qrcode'
-import { Store, initDataPath } from './persistence'
+import {
+  Store,
+  initDataPath,
+  getCanonicalUserDataPath,
+  migrateMobilePairingDataToCanonicalUserDataPath
+} from './persistence'
 import { applyAppIcon } from './app-icon'
 import { StatsCollector, initStatsPath } from './stats/collector'
 import { ClaudeUsageStore, initClaudeUsagePath } from './claude-usage/store'
@@ -17,6 +22,7 @@ import { OpenCodeUsageStore, initOpenCodeUsagePath } from './opencode-usage/stor
 import { killAllPty } from './ipc/pty'
 import { initDaemonPtyProvider, disconnectDaemon, shutdownDaemon } from './daemon/daemon-init'
 import { closeAllWatchers } from './ipc/filesystem-watcher'
+import { disposeWorktreeBaseDirectoryWatchers } from './ipc/worktree-base-directory-watcher'
 import { registerCoreHandlers } from './ipc/register-core-handlers'
 import { initObservability, shutdownObservability } from './observability'
 import { startSpan } from './observability/tracer'
@@ -62,6 +68,7 @@ import {
   suppressDevEducationForStore
 } from './startup/dev-education-suppression'
 import { maybeRedirectAppImageCliLaunch } from './startup/appimage-cli-redirect'
+import { maybeRedirectPackagedCliEntryLaunch } from './startup/packaged-cli-entry-redirect'
 import { startFirstWindowStartupServices } from './startup/first-window-startup-services'
 import { getDevInstanceIdentity } from './startup/dev-instance-identity'
 import { hydrateShellPath, mergePathSegments } from './startup/hydrate-shell-path'
@@ -146,6 +153,7 @@ import {
   type SyntheticAgentTitleProfile
 } from '../shared/synthetic-agent-title'
 import type { AgentStatusState } from '../shared/agent-status-types'
+import { resolveTuiAgentPermissionMode } from '../shared/tui-agent-permissions'
 import { KeybindingService } from './keybindings/keybinding-service'
 import { applyElectronProxySettings } from './network/proxy-settings'
 import { preserveAgentAuthBeforeRestart } from './agent-auth-restart-preservation'
@@ -184,6 +192,18 @@ let firstWindowStartupServicesReady: Promise<void> = Promise.resolve()
 let localPtyStartupReady: Promise<void> = Promise.resolve()
 const AGENT_STATE_CRASH_BREADCRUMB_MIN_INTERVAL_MS = 30_000
 const isServeMode = process.argv.includes('--serve')
+// Why: on Windows a CLI-shaped launch (Orca.exe <unpacked CLI entry>) that lost
+// ELECTRON_RUN_AS_NODE would otherwise boot the GUI, lose the single-instance
+// lock to a running window, and exit silently. Redirect it to node mode here,
+// before the lock gate below can bounce it.
+const packagedCliEntryRedirect = maybeRedirectPackagedCliEntryLaunch({
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  execPath: process.execPath
+})
+if (packagedCliEntryRedirect.redirected) {
+  app.exit(packagedCliEntryRedirect.status)
+}
 const appImageCliRedirect = maybeRedirectAppImageCliLaunch({
   isPackaged: app.isPackaged,
   resourcesPath: process.resourcesPath,
@@ -842,7 +862,20 @@ function openMainWindow(): BrowserWindow {
       // Why: some native OSC titles miss terminal idle/permission frames.
       // Inject hook-derived frames so the renderer title tracker updates too.
       const profile = getSyntheticAgentTitleProfile(payload.agentType)
-      if (profile && shouldDriveSyntheticAgentTitleFromHook(payload.agentType, payload.state)) {
+      const suppressSyntheticCodexAutoApprovalTitle =
+        payload.agentType === 'codex' &&
+        (payload.state === 'waiting' || payload.state === 'blocked')
+          ? shouldSuppressCodexAutoApprovalSyntheticTitleFromHook({
+              agentType: payload.agentType,
+              state: payload.state,
+              launchConfig: runtime?.getAgentStatusLaunchConfigForPaneKey(paneKey, { launchToken })
+            })
+          : false
+      if (
+        profile &&
+        shouldDriveSyntheticAgentTitleFromHook(payload.agentType, payload.state) &&
+        !suppressSyntheticCodexAutoApprovalTitle
+      ) {
         driveSyntheticTitleFromHook(paneKey, payload.state, profile)
       }
     }
@@ -921,7 +954,7 @@ function recordProcessGoneCrash(
     )
     return
   }
-  const key = getProcessGoneDedupeKey(processType, reason, exitCode)
+  const key = getProcessGoneDedupeKey(source, processType, reason, exitCode)
   if (!processGoneDedupe.shouldRecord(key)) {
     return
   }
@@ -974,9 +1007,16 @@ function shutdownWatchersOnce(): Promise<void> {
   if (!watcherShutdownPromise) {
     // Why: @parcel/watcher tears down native async work during unsubscribe.
     // Electron must wait for that cleanup before Node's environment exits.
-    watcherShutdownPromise = closeAllWatchers()
-      .catch((error) => {
-        console.error('[filesystem-watcher] shutdown failed:', error)
+    watcherShutdownPromise = Promise.allSettled([
+      closeAllWatchers(),
+      disposeWorktreeBaseDirectoryWatchers()
+    ])
+      .then((results) => {
+        for (const result of results) {
+          if (result.status === 'rejected') {
+            console.error('[filesystem-watcher] shutdown failed:', result.reason)
+          }
+        }
       })
       .then(() => {
         watcherShutdownDone = true
@@ -1262,6 +1302,32 @@ function driveSyntheticTitleFromHook(
   })
 }
 
+function shouldSuppressCodexAutoApprovalSyntheticTitleFromHook(args: {
+  agentType: string | null | undefined
+  state: AgentStatusState
+  launchConfig:
+    | {
+        agentArgs?: string | null
+        agentEnv?: Record<string, string> | null
+      }
+    | null
+    | undefined
+}): boolean {
+  if (args.agentType !== 'codex' || (args.state !== 'waiting' && args.state !== 'blocked')) {
+    return false
+  }
+  if (!args.launchConfig) {
+    return false
+  }
+  return (
+    resolveTuiAgentPermissionMode({
+      agent: 'codex',
+      agentArgs: args.launchConfig.agentArgs,
+      agentEnv: args.launchConfig.agentEnv
+    }) === 'yolo'
+  )
+}
+
 app.whenReady().then(async () => {
   logStartupMilestone('app-ready')
   electronApp.setAppUserModelId(devInstanceIdentity.appUserModelId)
@@ -1403,6 +1469,8 @@ app.whenReady().then(async () => {
           const terminalSnapshotLimit = 2_000
           let terminalHandle: string
           let terminalSessionId: string | null = null
+          let terminalPaneKey: string | null = null
+          let terminalPtyId: string | null = null
           let workspaceId: string
           let workspaceDisplayName: string | null = null
 
@@ -1416,6 +1484,8 @@ app.whenReady().then(async () => {
             })
             terminalHandle = created.startupTerminal?.handle ?? ''
             terminalSessionId = created.startupTerminal?.tabId ?? null
+            terminalPaneKey = created.startupTerminal?.paneKey ?? null
+            terminalPtyId = created.startupTerminal?.ptyId ?? null
             workspaceId = created.worktree.id
             workspaceDisplayName = created.worktree.displayName ?? null
             if (!terminalHandle) {
@@ -1438,6 +1508,8 @@ app.whenReady().then(async () => {
             )
             terminalHandle = terminal.handle
             terminalSessionId = terminal.tabId ?? null
+            terminalPaneKey = terminal.paneKey ?? null
+            terminalPtyId = terminal.ptyId ?? null
             workspaceId = terminal.worktreeId
             const worktree = await runtimeService.showManagedWorktree(`id:${workspaceId}`)
             workspaceDisplayName = worktree.displayName ?? null
@@ -1472,6 +1544,8 @@ app.whenReady().then(async () => {
             workspaceId,
             workspaceDisplayName,
             terminalSessionId,
+            terminalPaneKey,
+            terminalPtyId,
             completion
           }
         }
@@ -1627,9 +1701,17 @@ app.whenReady().then(async () => {
     app.exit(1)
     return
   }
+  // Why: existing installs may have already written mobile pairing credentials
+  // under the late app.getPath('userData') directory. Copy any missing files
+  // forward before the runtime switches exclusively to the canonical path.
+  migrateMobilePairingDataToCanonicalUserDataPath(app.getPath('userData'))
   runtimeRpc = new OrcaRuntimeRpcServer({
     runtime,
-    userDataPath: app.getPath('userData'),
+    // Why: mobile pairing (DeviceRegistry + E2EE keypair + runtime metadata)
+    // must share the stable path captured before app.setName(), not a late
+    // app.getPath('userData') that resolves elsewhere and drops paired devices
+    // across restarts/updates. See persistence.ts:getCanonicalUserDataPath.
+    userDataPath: getCanonicalUserDataPath(),
     enableWebSocket: true,
     ...(isE2E ? { wsPort: 0 } : {}),
     ...(devWsPort !== undefined ? { wsPort: devWsPort } : {}),
@@ -1779,7 +1861,9 @@ app.on('will-quit', (e) => {
           .then(() => awaitRuntimeFileWatcherUnsubscribes())
           .then(() => {
             if (ownedRuntimeId) {
-              clearRuntimeMetadataIfOwned(app.getPath('userData'), ownedPid, ownedRuntimeId)
+              // Why: must match the path the runtime server wrote metadata to
+              // (getCanonicalUserDataPath), not late app.getPath('userData').
+              clearRuntimeMetadataIfOwned(getCanonicalUserDataPath(), ownedPid, ownedRuntimeId)
             }
           })
           .catch((error) => {

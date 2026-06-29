@@ -329,6 +329,36 @@ describe('parseWorkspaceSession', () => {
     }
   })
 
+  it('preserves interrupted sleeping agent records across hydration', () => {
+    const result = parseWorkspaceSession({
+      activeRepoId: null,
+      activeWorktreeId: null,
+      activeTabId: null,
+      tabsByWorktree: {},
+      terminalLayoutsByTabId: {},
+      sleepingAgentSessionsByPaneKey: {
+        'tab1:pane-1': {
+          paneKey: 'tab1:pane-1',
+          tabId: 'tab1',
+          worktreeId: 'wt',
+          agent: 'codex',
+          providerSession: { key: 'session_id', id: 'codex-session' },
+          prompt: 'continue',
+          state: 'done',
+          capturedAt: 10,
+          updatedAt: 9,
+          interrupted: true,
+          origin: 'worktree-sleep'
+        }
+      }
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.sleepingAgentSessionsByPaneKey?.['tab1:pane-1']?.interrupted).toBe(true)
+    }
+  })
+
   it('preserves legacy live sleeping agent origins across hydration', () => {
     const result = parseWorkspaceSession({
       activeRepoId: null,
@@ -718,6 +748,70 @@ describe('parseWorkspaceSession', () => {
     if (result.ok) {
       expect(result.value.browserUrlHistory).toHaveLength(MAX_BROWSER_HISTORY_ENTRIES)
       expect(result.value.browserUrlHistory?.at(-1)?.url).toBe('https://example.com/199')
+    }
+  })
+
+  it('preserves a known viewMode on a unified tab', () => {
+    const result = parseWorkspaceSession({
+      activeRepoId: null,
+      activeWorktreeId: 'wt',
+      activeTabId: null,
+      tabsByWorktree: {},
+      terminalLayoutsByTabId: {},
+      unifiedTabs: {
+        wt: [
+          {
+            id: 'tab1',
+            entityId: 'tab1',
+            groupId: 'group1',
+            worktreeId: 'wt',
+            contentType: 'terminal',
+            label: 'Claude',
+            customLabel: null,
+            color: null,
+            sortOrder: 0,
+            createdAt: 0,
+            viewMode: 'chat'
+          }
+        ]
+      }
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.unifiedTabs?.wt[0].viewMode).toBe('chat')
+    }
+  })
+
+  it('degrades an unknown viewMode to the safe default instead of failing parse', () => {
+    const result = parseWorkspaceSession({
+      activeRepoId: null,
+      activeWorktreeId: 'wt',
+      activeTabId: null,
+      tabsByWorktree: {},
+      terminalLayoutsByTabId: {},
+      unifiedTabs: {
+        wt: [
+          {
+            id: 'tab1',
+            entityId: 'tab1',
+            groupId: 'group1',
+            worktreeId: 'wt',
+            contentType: 'terminal',
+            label: 'Claude',
+            customLabel: null,
+            color: null,
+            sortOrder: 0,
+            createdAt: 0,
+            // A newer build could persist a mode this version doesn't know.
+            viewMode: 'split-future-mode'
+          }
+        ]
+      }
+    })
+    // The whole-session parse must still succeed; the unknown mode degrades.
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.unifiedTabs?.wt[0].viewMode).toBe('terminal')
     }
   })
 })

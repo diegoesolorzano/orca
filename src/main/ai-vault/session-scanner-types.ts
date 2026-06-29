@@ -9,10 +9,14 @@ export type AiVaultScanOptions = {
   claudeProjectsDir?: string
   codexSessionsDir?: string
   additionalCodexSessionsDirs?: readonly string[]
+  wslHomeDirs?: readonly string[]
   geminiSessionsDir?: string
   copilotSessionsDir?: string
   cursorProjectsDir?: string
   opencodeStorageDir?: string
+  // Why: OpenCode 1.17.x stores sessions in SQLite; tests inject a temp DB
+  // here so they don't depend on the real ~/.local/share/opencode.
+  opencodeDbPaths?: readonly string[]
   grokSessionsDir?: string
   devinTranscriptsDir?: string
   hermesSessionsDir?: string
@@ -25,6 +29,9 @@ export type AiVaultScanOptions = {
   kimiSessionsDir?: string
   limit?: number
   limitPerAgent?: number
+  // Active workspace/project paths whose sessions must be included regardless of
+  // the recency cap (see discoverInScopeClaudeFiles).
+  scopePaths?: readonly string[]
   platform?: NodeJS.Platform
 }
 
