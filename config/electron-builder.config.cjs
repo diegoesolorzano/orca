@@ -206,6 +206,13 @@ module.exports = {
     // artifacts do not fail with broken ad-hoc launch behavior.
     hardenedRuntime: isMacRelease,
     notarize: isMacRelease,
+    // Why (fork): sign local/dev builds with a stable self-signed code-signing
+    // cert ("Orca Fork Local Signing") so macOS TCC keeps granted permissions
+    // (Accessibility, screen, mic, automation) across rebuilds. Ad-hoc signing
+    // changes the cdhash every build, so TCC treats each rebuild as a new app
+    // and re-prompts. The release path keeps Apple auto-discovery untouched.
+    // Create the cert once: see FORK-NOTES.md "Firma local estable".
+    identity: isMacRelease ? undefined : 'Orca Fork Local Signing',
     extraResources: [
       ...commonExtraResources,
       macSpeechNativeResource,

@@ -119,6 +119,26 @@ open -a Orca
 
 ## Consideraciones del build propio
 
+- **Firma local estable (TCC no re-pide permisos en cada rebuild).** El build dev
+  se firmaba ad-hoc (`identityName=-`), y macOS liga los permisos de privacidad
+  (Accesibilidad, pantalla, micrófono, automatización) al cdhash de la firma —
+  que cambia en cada compilación, por eso re-preguntaba. Solución: firmar cada
+  build con un certificado autofirmado **estable** de code-signing.
+  - Certificado (creado una vez, vive en el llavero `login`):
+    `Orca Fork Local Signing` (autofirmado, EKU Code Signing, 10 años, trust de
+    usuario via `security add-trusted-cert -p codeSign`). NO requiere Apple
+    Developer ni notarización.
+  - Recrearlo si se pierde: `openssl req -x509` con EKU codeSigning →
+    `openssl pkcs12 -export` → `security import -T /usr/bin/codesign` →
+    `security add-trusted-cert -r trustRoot -p codeSign -k login.keychain`.
+  - El build lo usa vía `config/electron-builder.config.cjs` →
+    `identity: isMacRelease ? undefined : 'Orca Fork Local Signing'`. Compilar con
+    `CSC_IDENTITY_AUTO_DISCOVERY=false` para que no busque un Developer ID.
+  - Tras cambiar a la firma estable, hay que conceder los permisos UNA vez más
+    (la firma nueva ≠ la ad-hoc anterior); a partir de ahí persisten entre swaps.
+  - La primera firma puede abrir un diálogo del llavero ("codesign quiere usar la
+    clave") → elegir **Permitir siempre**.
+
 - **Auto-updater: neutralizado funcionalmente (parche del fork).** El build SI
   recibe el feed oficial y muestra "Update Available" — se conserva a proposito
   como NOTIFICACION de releases upstream — pero NO descarga ni instala. Flag
