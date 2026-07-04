@@ -128,8 +128,16 @@ Remotes: `origin` = diegoesolorzano/orca · `upstream` = stablyai/orca
 
 ```bash
 pnpm install
-pnpm run build:mac           # genera dist/mac-arm64/Orca.app
-# swap:
+CSC_IDENTITY_AUTO_DISCOVERY=false pnpm run build:mac   # genera dist/mac-arm64/Orca.app
+./scripts/fork-swap-app.sh                             # swap del .app en /Applications
+```
+
+`scripts/fork-swap-app.sh` (fork-only, portatil: resuelve el repo relativo a si
+mismo) hace el swap con validaciones: falla si no existe el build ANTES de borrar
+el .app instalado, imprime la version, y avisa si el build no lleva la firma
+`Orca Fork Local Signing` (evita re-pedir permisos). Equivale al swap manual:
+
+```bash
 osascript -e 'quit app "Orca"' ; sleep 2
 rm -rf /Applications/Orca.app   # (el build anterior del fork; el oficial 1.4.30 esta respaldado)
 cp -R dist/mac-arm64/Orca.app /Applications/Orca.app
