@@ -88,6 +88,27 @@ Tres ajustes en `src/renderer/src/components/activity/ActivityPrototypePage.tsx`
    { recordInteraction: true })`, Escape cancela. Reusa el mismo `customTitle` que ya
    gana en `paneTitleForEntry` (y en el tab bar). Copia i18n: `fork.activity.renameSession`.
 
+## Parche de producto: sidebar — sin branch duplicado en título y subtítulo
+
+En `src/renderer/src/components/sidebar/WorktreeCard.tsx`, sin título custom el
+`displayName` se auto-siembra al branch, así que la tarjeta mostraba el branch
+como TÍTULO y otra vez como SUBTÍTULO (identity) — redundante. Upstream lo hace a
+propósito (test `WorktreeCard.compact-hover` esperaba 3× el branch).
+
+- Fix: `branchMatchesVisibleTitle` (título visible === branch) apaga el subtítulo
+  del branch. Un booleano único `showIdentitySubtitleInNewCard` alimenta tanto el
+  render como `hasDetailedMetaRowContent` (si no, quedaba una meta-row vacía).
+  También se filtra el path legacy `showBranch`.
+- NO se afectan: títulos custom, títulos de PR/Linear/issue, ni el detached HEAD
+  (`Detached HEAD @ <sha>`), porque todos difieren del branch — ahí el subtítulo
+  sigue aportando.
+- El título YA es renombrable (doble clic en la tarjeta, o el atajo
+  `workspace.rename`) → se guarda en `worktree.displayName` vía `updateWorktreeMeta`.
+- Conflicto de merge probable con upstream: se ajustaron 3 aserciones de tests
+  upstream que fijaban la conducta redundante (`WorktreeCard.compact-hover` 3→2,
+  y dos en `WorktreeCard.quick-actions` con títulos custom para desacoplarlos del
+  caso de deduplicación). Al traer upstream, reaplicar la conducta del fork.
+
 ## Parche de producto: confirmación al salir (Cmd+Q)
 
 Upstream salta a propósito el diálogo de cierre en Cmd+Q (`isQuitting`) — solo confirma

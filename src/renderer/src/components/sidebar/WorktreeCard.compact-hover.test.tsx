@@ -490,7 +490,11 @@ describe('WorktreeCard compact hover details', () => {
     expect(markup).not.toContain('Live Ports')
   })
 
-  it('does not duplicate workspace identity when trimmed title equals branch', async () => {
+  it('drops the redundant identity subtitle when the title already is the branch (fork)', async () => {
+    // Why (fork): upstream renders the branch as title AND identity subtitle AND
+    // hover (3×) even when they are identical. The fork suppresses the identity
+    // subtitle in that case, so the branch shows only as the title and the hover
+    // (2×) — no duplicated line in the card body.
     settings = { compactWorktreeCards: false, experimentalNewWorktreeCardStyle: true }
     worktreeCardProperties = ['status', 'branch']
     const { default: WorktreeCard } = await import('./WorktreeCard')
@@ -504,7 +508,7 @@ describe('WorktreeCard compact hover details', () => {
     )
 
     expectParentBodyIsHoverTrigger(markup)
-    expect(markup.match(/feature\/local-branch/g)).toHaveLength(3)
+    expect(markup.match(/feature\/local-branch/g)).toHaveLength(2)
   })
 
   it('keeps detailed metadata hover scoped to metadata icons by default', async () => {

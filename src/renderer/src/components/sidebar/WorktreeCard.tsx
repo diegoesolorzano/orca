@@ -605,6 +605,12 @@ const WorktreeCard = React.memo(function WorktreeCard({
   })
   const legacyCardTitleDisplay = coerceWorktreeCardVisibleTitle(worktree.displayName)
   const visibleCardTitle = newCardStyle ? cardTitleDisplay : legacyCardTitleDisplay
+  // Why (fork): with no custom title, displayName is auto-seeded to the branch,
+  // so the title already shows the branch — repeating it in the identity
+  // subtitle is pure redundancy. Suppress the branch subtitle when it just
+  // echoes the visible title (custom titles, PR/Linear titles, and the
+  // detached-HEAD SHA are unaffected because they differ from `branch`).
+  const branchMatchesVisibleTitle = branch.length > 0 && visibleCardTitle.trim() === branch.trim()
   const isDeleting = deleteState?.isDeleting ?? false
   const deleteModifierPressed = useWorkspaceDeleteModifierPressed()
 
@@ -1177,7 +1183,13 @@ const WorktreeCard = React.memo(function WorktreeCard({
     !isFolder &&
     branch.length > 0 &&
     !newCardStyle &&
+    !branchMatchesVisibleTitle &&
     (!compactCards || branch !== worktree.displayName)
+  // Why (fork): drop the identity subtitle when it only echoes the branch
+  // already shown as the title (see branchMatchesVisibleTitle). Kept as one
+  // boolean so the meta-row presence check and the render stay in sync.
+  const showIdentitySubtitleInNewCard =
+    showIdentityInNewCard && !(identityDisplay === branch && branchMatchesVisibleTitle)
   // Why: rebases already surface in source control; keep dense cards from
   // carrying a persistent rebase chip while preserving other interruption cues.
   const showConflictOperationBadge =
@@ -1198,7 +1210,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
     showHostContextBadge ||
     folderMetaRowContent ||
     showBranch ||
-    showIdentityInNewCard ||
+    showIdentitySubtitleInNewCard ||
     showDetachedHeadInMetaRow ||
     showConflictOperationBadge ||
     cacheStartedAt != null ||
@@ -1654,7 +1666,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
                 </Badge>
               )}
 
-              {showIdentityInNewCard ? (
+              {showIdentitySubtitleInNewCard ? (
                 <TruncatedSidebarLabel
                   text={identityDisplay!}
                   className="text-[11px] text-muted-foreground leading-none"

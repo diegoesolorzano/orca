@@ -293,7 +293,7 @@ describe('WorktreeCard quick actions', () => {
 
     const markup = renderToStaticMarkup(
       <WorktreeCard
-        worktree={makeWorktree({ displayName: 'quick-action', branch: 'quick-action' })}
+        worktree={makeWorktree({ displayName: 'Quick action card', branch: 'quick-action' })}
         repo={makeRepo()}
         isActive={false}
         hideRepoBadge
@@ -371,7 +371,7 @@ describe('WorktreeCard quick actions', () => {
     const markup = renderToStaticMarkup(
       <WorktreeCard
         worktree={makeWorktree({
-          displayName: 'main',
+          displayName: 'Main workspace',
           branch: 'main',
           isMainWorktree: true
         })}
