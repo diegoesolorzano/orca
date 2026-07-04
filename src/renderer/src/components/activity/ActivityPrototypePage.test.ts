@@ -6,7 +6,7 @@ import {
   type AgentStatusEntry
 } from '../../../../shared/agent-status-types'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
-import type { Repo, TerminalTab, Worktree } from '../../../../shared/types'
+import type { Repo, TerminalTab, TuiAgent, Worktree } from '../../../../shared/types'
 import { formatAgentTypeLabel } from '@/lib/agent-status'
 import type { RetainedAgentEntry } from '@/store/slices/agent-status'
 import {
@@ -161,6 +161,7 @@ function makeActivityResult(args: {
   entries?: Record<string, AgentStatusEntry>
   retained?: Record<string, RetainedAgentEntry>
   tab?: TerminalTab
+  paneForegroundAgentByPaneKey?: Record<string, { agent: TuiAgent | null }>
   now?: number
 }): ReturnType<typeof buildActivityEvents> {
   const repo = makeRepo()
@@ -176,6 +177,7 @@ function makeActivityResult(args: {
     worktreeMap: new Map([[worktree.id, worktree]]),
     repoMap: new Map([[repo.id, repo]]),
     acknowledgedAgentsByPaneKey: {},
+    paneForegroundAgentByPaneKey: args.paneForegroundAgentByPaneKey,
     now: args.now ?? 3_000
   })
 }
@@ -569,6 +571,30 @@ describe('buildActivityEvents', () => {
 })
 
 describe('activity thread grouping', () => {
+  it('groups a Claude Code wrapper under its foreground process identity, not the hook agentType', () => {
+    // Why (fork): kimi/minimax/zai run `exec -a <name> claude`, so the hook
+    // reports agentType 'claude'; the process-table foreground read is the
+    // only source that distinguishes the wrapper.
+    const result = makeActivityResult({
+      entries: { [PANE_KEY]: makeWorkingEntryWithoutHistory() },
+      paneForegroundAgentByPaneKey: { [PANE_KEY]: { agent: 'zai' } }
+    })
+    const groups = buildActivityThreadGroups(makeThreads(result), 'agent')
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0].key).toBe('agent:zai')
+  })
+
+  it('keeps the hook agentType when no foreground identity is recognized', () => {
+    const result = makeActivityResult({
+      entries: { [PANE_KEY]: makeWorkingEntryWithoutHistory() }
+    })
+    const groups = buildActivityThreadGroups(makeThreads(result), 'agent')
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0].key).toBe('agent:claude')
+  })
+
   it('status grouping separates interrupted done from normal done and keeps Interrupted label', () => {
     const repo = makeRepo()
     const worktree = makeWorktree()

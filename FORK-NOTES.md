@@ -64,6 +64,30 @@ así el proceso se llama `kimi`/`minimax`/`zai` en vez de `claude` y Orca los di
 - Genera conflicto menor de merge en `types.ts`/`tui-agent-config.ts` al traer upstream;
   reaplicar la entrada `minimax`.
 
+## Parche de producto: panel de Actividad (agrupar, selector, renombrar)
+
+Tres ajustes en `src/renderer/src/components/activity/ActivityPrototypePage.tsx`:
+
+1. **Wrappers propios (kimi/minimax/zai) aparecen en "group by Agent".** El panel
+   agrupaba por `entry.agentType`, que viene del hook de Claude Code — y como los
+   wrappers SON `claude` por debajo, el hook reporta `agentType: 'claude'` y todos
+   caían en el mismo grupo "Claude". Fix: `effectiveActivityAgentType()` prefiere la
+   identidad del proceso en foreground (`paneForegroundAgentByPaneKey`, que sí
+   reconoce `zai`/`kimi`/`minimax` por `exec -a <nombre>`) cuando el hook solo conoce
+   el `claude` genérico. `buildActivityEvents` recibe ese map y lo aplica en los tres
+   sitios de `agentType` (live, migration-unsupported, retained).
+   - Limitación: el foreground read es solo para panes LOCALES (`isTrackablePtyId`
+     excluye SSH), así que un wrapper sobre SSH sigue agrupando como Claude.
+   - Tests: `ActivityPrototypePage.test.ts` ("groups a Claude Code wrapper under its
+     foreground process identity").
+2. **El selector Status/Project/Worktree/Agent persiste.** Era `useState('status')`
+   puro → se reseteaba al desmontar/montar el panel. Ahora se guarda en `localStorage`
+   (`orca.activity.groupBy`) vía `readPersistedActivityGroupBy`/`writePersistedActivityGroupBy`.
+3. **Renombrar la sesión desde la fila.** Doble clic en el título de una fila
+   (`ThreadRow`) abre un input inline; Enter confirma vía `setTabCustomTitle(tab.id, …,
+   { recordInteraction: true })`, Escape cancela. Reusa el mismo `customTitle` que ya
+   gana en `paneTitleForEntry` (y en el tab bar). Copia i18n: `fork.activity.renameSession`.
+
 ## Parche de producto: confirmación al salir (Cmd+Q)
 
 Upstream salta a propósito el diálogo de cierre en Cmd+Q (`isQuitting`) — solo confirma

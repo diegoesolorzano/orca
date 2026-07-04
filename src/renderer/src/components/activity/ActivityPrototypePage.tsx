@@ -53,7 +53,7 @@ import {
   setActivityTerminalPortals,
   type ActivityTerminalPortalTarget
 } from './activity-terminal-portal'
-import type { Repo, TerminalTab, Worktree } from '../../../../shared/types'
+import type { Repo, TerminalTab, TuiAgent, Worktree } from '../../../../shared/types'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
 import {
   AGENT_STATUS_STALE_AFTER_MS,
@@ -71,6 +71,54 @@ import { getAgentRowPrimaryText } from '@/lib/agent-row-primary-text'
 
 type ThreadReadFilter = 'all' | 'unread'
 type ActivityGroupBy = 'status' | 'project' | 'worktree' | 'agent'
+
+const ACTIVITY_GROUP_BY_STORAGE_KEY = 'orca.activity.groupBy'
+const ACTIVITY_GROUP_BY_VALUES: readonly ActivityGroupBy[] = [
+  'status',
+  'project',
+  'worktree',
+  'agent'
+]
+
+// Why: the group-by choice is a durable UI preference; plain component state
+// reset it to 'status' every time the Activity panel unmounted/remounted.
+function readPersistedActivityGroupBy(): ActivityGroupBy {
+  try {
+    const stored = window.localStorage.getItem(ACTIVITY_GROUP_BY_STORAGE_KEY)
+    if (stored && (ACTIVITY_GROUP_BY_VALUES as readonly string[]).includes(stored)) {
+      return stored as ActivityGroupBy
+    }
+  } catch {
+    // localStorage can throw in restricted contexts; fall back to default.
+  }
+  return 'status'
+}
+
+function writePersistedActivityGroupBy(value: ActivityGroupBy): void {
+  try {
+    window.localStorage.setItem(ACTIVITY_GROUP_BY_STORAGE_KEY, value)
+  } catch {
+    // Ignore persistence failures; the in-memory selection still works.
+  }
+}
+
+// Why (fork): Claude Code wrappers (kimi/minimax/zai run `exec -a <name> claude`)
+// self-report agentType 'claude' through the hook, so Activity buckets them all
+// under Claude. The process-table foreground read recognizes the real wrapper
+// name — prefer it when the hook only knows the generic 'claude' base.
+function effectiveActivityAgentType(
+  hookAgentType: AgentType | undefined,
+  foregroundAgent: TuiAgent | null | undefined
+): AgentType {
+  if (
+    foregroundAgent &&
+    foregroundAgent !== hookAgentType &&
+    (hookAgentType === undefined || hookAgentType === 'claude')
+  ) {
+    return foregroundAgent
+  }
+  return hookAgentType ?? 'unknown'
+}
 type ActivityEventState = Extract<AgentStatusState, 'done' | 'blocked' | 'waiting'>
 type ActivityLiveAgentState = Extract<AgentStatusState, 'working' | 'blocked' | 'waiting'>
 type ActivityStatusGroupId = 'working' | 'blocked' | 'waiting' | 'done' | 'interrupted'
@@ -612,6 +660,9 @@ export function buildActivityEvents(args: {
   worktreeMap: Map<string, Worktree>
   repoMap: Map<string, Repo>
   acknowledgedAgentsByPaneKey: Record<string, number>
+  // Why (fork): process-table foreground identity per pane, used to give
+  // Claude Code wrappers (kimi/minimax/zai) their own agent group.
+  paneForegroundAgentByPaneKey?: Record<string, { agent: TuiAgent | null }>
   now: number
 }): {
   events: ActivityEvent[]
@@ -639,6 +690,10 @@ export function buildActivityEvents(args: {
       continue
     }
     const ackAt = args.acknowledgedAgentsByPaneKey[paneKey] ?? 0
+    const agentType = effectiveActivityAgentType(
+      entry.agentType,
+      args.paneForegroundAgentByPaneKey?.[paneKey]?.agent
+    )
     // Why: live status is separate from historical events. A fresh working turn
     // should update/create the pane thread without being counted as an unread
     // done/blocked/waiting event.
@@ -651,7 +706,7 @@ export function buildActivityEvents(args: {
         repo: args.repoMap.get(context.worktree.repoId) ?? null,
         entry,
         tab: context.tab,
-        agentType: entry.agentType ?? 'unknown'
+        agentType
       }
     }
     appendActivityEventsForEntry({
@@ -661,7 +716,7 @@ export function buildActivityEvents(args: {
       repo: args.repoMap.get(context.worktree.repoId) ?? null,
       entry,
       tab: context.tab,
-      agentType: entry.agentType ?? 'unknown',
+      agentType,
       agentAlive: true,
       acknowledgedAt: ackAt
     })
@@ -681,6 +736,10 @@ export function buildActivityEvents(args: {
       continue
     }
     const ackAt = args.acknowledgedAgentsByPaneKey[entry.paneKey] ?? 0
+    const agentType = effectiveActivityAgentType(
+      entry.agentType,
+      args.paneForegroundAgentByPaneKey?.[entry.paneKey]?.agent
+    )
     liveAgentByPaneKey[entry.paneKey] = {
       state: 'blocked',
       timestamp: entry.stateStartedAt,
@@ -688,7 +747,7 @@ export function buildActivityEvents(args: {
       repo: args.repoMap.get(context.worktree.repoId) ?? null,
       entry,
       tab: context.tab,
-      agentType: entry.agentType ?? 'unknown'
+      agentType
     }
     appendActivityEventsForEntry({
       events,
@@ -697,7 +756,7 @@ export function buildActivityEvents(args: {
       repo: args.repoMap.get(context.worktree.repoId) ?? null,
       entry,
       tab: context.tab,
-      agentType: entry.agentType ?? 'unknown',
+      agentType,
       agentAlive: false,
       acknowledgedAt: ackAt,
       migrationUnsupportedPtyId: unsupported.ptyId
@@ -724,7 +783,10 @@ export function buildActivityEvents(args: {
       repo: args.repoMap.get(worktree.repoId) ?? null,
       entry: retained.entry,
       tab: retained.tab,
-      agentType: retained.agentType,
+      agentType: effectiveActivityAgentType(
+        retained.agentType,
+        args.paneForegroundAgentByPaneKey?.[paneKey]?.agent
+      ),
       agentAlive: false,
       acknowledgedAt: ackAt
     })
@@ -1219,6 +1281,29 @@ function ThreadRow({
   const renderedResponsePreview = activityThreadResponseRenderPreview({
     responsePreview: thread.responsePreview
   })
+  // Why: double-click the title to rename the session's terminal tab (a
+  // user-set customTitle wins in paneTitleForEntry), so a row reads as what
+  // you are actually working on instead of the first prompt.
+  const [isRenaming, setIsRenaming] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
+  const renameInputRef = useRef<HTMLInputElement>(null)
+  const openRename = (): void => {
+    setRenameValue(thread.tab.customTitle ?? thread.paneTitle)
+    setIsRenaming(true)
+  }
+  const commitRename = (): void => {
+    const trimmed = renameValue.trim()
+    useAppStore
+      .getState()
+      .setTabCustomTitle(thread.tab.id, trimmed || null, { recordInteraction: true })
+    setIsRenaming(false)
+  }
+  useEffect(() => {
+    if (isRenaming) {
+      renameInputRef.current?.focus()
+      renameInputRef.current?.select()
+    }
+  }, [isRenaming])
   return (
     <div
       data-current={selected ? 'true' : undefined}
@@ -1271,16 +1356,42 @@ function ThreadRow({
           </span>
         </span>
         <div className="min-w-0 flex-1">
-          <span
-            className={cn(
-              'min-w-0 text-xs leading-snug',
-              compactMode ? 'block truncate' : 'line-clamp-3 break-words',
-              thread.unread ? 'font-semibold text-foreground' : 'font-medium text-foreground'
-            )}
-            title={compactMode ? thread.paneTitle : undefined}
-          >
-            {thread.paneTitle}
-          </span>
+          {isRenaming ? (
+            <Input
+              ref={renameInputRef}
+              value={renameValue}
+              onChange={(event) => setRenameValue(event.target.value)}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                event.stopPropagation()
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  commitRename()
+                } else if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setIsRenaming(false)
+                }
+              }}
+              onBlur={commitRename}
+              className="h-6 min-w-0 text-xs"
+              aria-label={translate('fork.activity.renameSession', 'Rename session')}
+            />
+          ) : (
+            <span
+              className={cn(
+                'min-w-0 text-xs leading-snug',
+                compactMode ? 'block truncate' : 'line-clamp-3 break-words',
+                thread.unread ? 'font-semibold text-foreground' : 'font-medium text-foreground'
+              )}
+              title={compactMode ? thread.paneTitle : undefined}
+              onDoubleClick={(event) => {
+                event.stopPropagation()
+                openRename()
+              }}
+            >
+              {thread.paneTitle}
+            </span>
+          )}
           {!compactMode && renderedResponsePreview ? (
             <CommentMarkdown
               content={renderedResponsePreview}
@@ -1400,7 +1511,7 @@ function ThreadRow({
 
 export default function ActivityPrototypePage(): React.JSX.Element {
   const [readFilter, setReadFilter] = useState<ThreadReadFilter>('all')
-  const [groupBy, setGroupBy] = useState<ActivityGroupBy>('status')
+  const [groupBy, setGroupBy] = useState<ActivityGroupBy>(readPersistedActivityGroupBy)
   const [query, setQuery] = useState('')
   const activityFilterInputRef = useRef<HTMLInputElement | null>(null)
   const [compactMode, setCompactMode] = useState(false)
@@ -1438,6 +1549,7 @@ export default function ActivityPrototypePage(): React.JSX.Element {
       worktreeMap: getWorktreeMapFromState(s),
       repoMap: getRepoMapFromState(s),
       acknowledgedAgentsByPaneKey: s.acknowledgedAgentsByPaneKey,
+      paneForegroundAgentByPaneKey: s.paneForegroundAgentByPaneKey,
       acknowledgeAgents: s.acknowledgeAgents,
       unacknowledgeAgents: s.unacknowledgeAgents
     }))
@@ -1457,6 +1569,7 @@ export default function ActivityPrototypePage(): React.JSX.Element {
         worktreeMap: storeData.worktreeMap,
         repoMap: storeData.repoMap,
         acknowledgedAgentsByPaneKey: storeData.acknowledgedAgentsByPaneKey,
+        paneForegroundAgentByPaneKey: storeData.paneForegroundAgentByPaneKey,
         // Why: Date.now() is read inside the memo (not as a dep) so stale-decay
         // recalculates whenever agentStatusEpoch ticks. The epoch bumps when the
         // freshness boundary crosses, driving re-evaluation without coupling to
@@ -1806,7 +1919,11 @@ export default function ActivityPrototypePage(): React.JSX.Element {
               </div>
               <Select
                 value={groupBy}
-                onValueChange={(value) => setGroupBy(value as ActivityGroupBy)}
+                onValueChange={(value) => {
+                  const next = value as ActivityGroupBy
+                  setGroupBy(next)
+                  writePersistedActivityGroupBy(next)
+                }}
               >
                 <SelectTrigger
                   size="sm"
