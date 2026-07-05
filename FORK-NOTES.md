@@ -64,6 +64,34 @@ así el proceso se llama `kimi`/`minimax`/`zai` en vez de `claude` y Orca los di
 - Genera conflicto menor de merge en `types.ts`/`tui-agent-config.ts` al traer upstream;
   reaplicar la entrada `minimax`.
 
+### Para que aparezcan en el panel de Actividad/agentes (hooks)
+
+El ícono del tab (reconocimiento por proceso) es INDEPENDIENTE del panel de
+Actividad. El panel se alimenta de `agentStatusByPaneKey`, que para una sesión
+lanzada a mano se llena SOLO cuando el hook de Claude de Orca hace POST al
+servidor loopback. Orca instala ese hook únicamente en `~/.claude/settings.json`
+(`src/main/claude/hook-settings.ts` — hardcoded, ignora `CLAUDE_CONFIG_DIR`).
+
+Los wrappers exportan `CLAUDE_CONFIG_DIR=~/.claude-<provider>`, así que el Claude
+que arrancan lee OTRO `settings.json` sin el hook → nunca postea → la sesión no
+aparece en Actividad (aunque el ícono del tab sí salga). El hook es env-driven
+(`ORCA_PANE_KEY` / `ORCA_AGENT_HOOK_PORT` / `ORCA_AGENT_HOOK_TOKEN`, ya inyectadas
+en toda terminal de Orca), así que basta con REPLICAR sus entradas en el
+`settings.json` de cada provider dir.
+
+- Script: `scripts/fork-sync-provider-hooks.sh` — copia (idempotente,
+  drift-proof) solo los hooks de Orca de `~/.claude/settings.json` a
+  `~/.claude-{zai,kimi,minimax}/settings.json`, preservando los settings propios
+  de cada provider. Correr tras cada update de Orca (por si cambia el set de
+  hooks) y reiniciar las sesiones de wrapper para que lo tomen.
+- El hook postea `agentType: 'claude'` (siempre). El fork luego lo re-etiqueta al
+  wrapper real (`zai`/`kimi`/`minimax`) al agrupar por Agente vía
+  `effectiveActivityAgentType` + `paneForegroundAgentByPaneKey` (ver el parche del
+  panel de Actividad más abajo). Los dos arreglos se complementan: el hook lo hace
+  APARECER; el override lo muestra con su nombre real.
+- Limitación: solo panes locales. El foreground read (que da el nombre real) no
+  corre sobre SSH, así que un wrapper remoto agruparía como Claude.
+
 ## Parche de producto: panel de Actividad (agrupar, selector, renombrar)
 
 Tres ajustes en `src/renderer/src/components/activity/ActivityPrototypePage.tsx`:
