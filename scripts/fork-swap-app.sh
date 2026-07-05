@@ -23,7 +23,10 @@ echo "→ swapping in Orca $built_version"
 
 # Confirm the build carries the stable local signature; an ad-hoc build would
 # make macOS re-prompt for every privacy permission (see FORK-NOTES.md).
-if ! codesign -dvvv "$BUILT_APP" 2>&1 | grep -q 'Authority=Orca Fork Local Signing'; then
+# Capture first, then grep: `codesign … | grep -q` closes the pipe early, and
+# under `set -o pipefail` codesign's SIGPIPE (141) would fake a signature miss.
+codesign_info="$(codesign -dvvv "$BUILT_APP" 2>&1 || true)"
+if ! grep -q 'Authority=Orca Fork Local Signing' <<<"$codesign_info"; then
   echo "warning: build is NOT signed with 'Orca Fork Local Signing'." >&2
   echo "         macOS may re-ask for permissions. Continue? [y/N]" >&2
   read -r reply
