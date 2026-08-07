@@ -73,6 +73,11 @@ function hydrateUnifiedFormat(
         .filter((tab) => tab.quickCommandLabel?.trim())
         .map((tab) => [tab.id, tab.quickCommandLabel!.trim()])
     )
+    const aiVaultTitleByTerminalId = new Map(
+      (session.tabsByWorktree[worktreeId] ?? [])
+        .filter((tab) => tab.aiVaultTitle)
+        .map((tab) => [tab.id, tab.aiVaultTitle!])
+    )
     tabsByWorktree[worktreeId] = [...tabs]
       .map((tab) => ({
         ...tab,
@@ -86,9 +91,11 @@ function hydrateUnifiedFormat(
           ? tab.quickCommandLabel.trim()
           : quickCommandLabelByTerminalId.get(tab.entityId)
         const generatedLabel = generatedTitleByTerminalId.get(tab.entityId)
+        const aiVaultTitle = tab.aiVaultTitle ?? aiVaultTitleByTerminalId.get(tab.entityId)
         return {
           ...tab,
           ...(quickCommandLabel ? { quickCommandLabel } : {}),
+          ...(aiVaultTitle ? { aiVaultTitle } : {}),
           ...(!tab.generatedLabel?.trim() && generatedLabel ? { generatedLabel } : {})
         }
       })
@@ -251,8 +258,17 @@ function hydrateLegacyFormat(
     let activeTabId: string | null = null
     if (activeTabType === 'editor') {
       activeTabId = session.activeFileIdByWorktree?.[worktreeId] ?? null
-    } else if (session.activeTabId && terminalTabs.some((t) => t.id === session.activeTabId)) {
-      activeTabId = session.activeTabId
+    } else {
+      // Why: honor this worktree's own remembered terminal before the global
+      // active tab. The global session.activeTabId only names the last-focused
+      // worktree's tab, so using it here reset every other worktree to its
+      // first terminal on restart.
+      const rememberedTabId = session.activeTabIdByWorktree?.[worktreeId]
+      if (rememberedTabId && terminalTabs.some((t) => t.id === rememberedTabId)) {
+        activeTabId = rememberedTabId
+      } else if (session.activeTabId && terminalTabs.some((t) => t.id === session.activeTabId)) {
+        activeTabId = session.activeTabId
+      }
     }
     if (activeTabId && !tabs.some((t) => t.id === activeTabId)) {
       activeTabId = tabs[0]?.id ?? null

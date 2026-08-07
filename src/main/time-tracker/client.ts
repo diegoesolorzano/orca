@@ -1,3 +1,4 @@
+import { cancelUnreadResponseBody } from '../lib/unread-response-body'
 import { DEFAULT_TIME_TRACKER_CONFIG, type ProjectContext, type TrackerEvent } from './types'
 
 export type TrackerClient = {
@@ -19,6 +20,8 @@ async function post(url: string, body: unknown, timeoutMs: number): Promise<bool
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs)
     })
+    // Why: only res.ok is read; an unread undici body can crash the process (orca#8695).
+    await cancelUnreadResponseBody(res)
     return res.ok
   } catch {
     return false
@@ -61,6 +64,7 @@ export function createTrackerClient(
         const res = await fetch(`${baseUrl}/health`, {
           signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS)
         })
+        await cancelUnreadResponseBody(res)
         return res.ok
       } catch {
         return false

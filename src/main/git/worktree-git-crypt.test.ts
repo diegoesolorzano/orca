@@ -27,7 +27,8 @@ vi.mock('fs/promises', async (importOriginal) => {
 })
 
 vi.mock('./status', () => ({
-  resolveGitDir: resolveGitDirMock
+  resolveGitDir: resolveGitDirMock,
+  runWithGitReadCacheInvalidation: <T,>(run: () => Promise<T>) => run()
 }))
 
 import { join } from 'path'
@@ -104,7 +105,7 @@ describe('addWorktree on git-crypt repos', () => {
         WORKTREE,
         'refs/remotes/origin/main'
       ],
-      { cwd: REPO }
+      { cwd: REPO, timeout: 180_000 }
     ])
     expect(cpMock).toHaveBeenCalledWith(REPO_GIT_CRYPT, join(WORKTREE_GIT_DIR, 'git-crypt'), {
       recursive: true,
@@ -166,7 +167,7 @@ describe('addWorktree on git-crypt repos', () => {
     })
 
     expect(gitExecFileAsyncMock.mock.calls).toEqual([
-      [['worktree', 'add', '--no-checkout', WORKTREE, BRANCH], { cwd: REPO }],
+      [['worktree', 'add', '--no-checkout', WORKTREE, BRANCH], { cwd: REPO, timeout: 180_000 }],
       [['checkout', BRANCH], { cwd: WORKTREE }]
     ])
     expect(cpMock).toHaveBeenCalledWith(REPO_GIT_CRYPT, join(WORKTREE_GIT_DIR, 'git-crypt'), {

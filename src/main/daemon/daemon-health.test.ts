@@ -1,19 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { existsSync, linkSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
-import { createServer, connect, type Server } from 'node:net'
+import { createServer, connect, Socket, type Server } from 'node:net'
 import { DaemonServer } from './daemon-server'
 import { getDaemonPidPath, serializeDaemonPidFile } from './daemon-spawner'
 import {
   checkDaemonHealth,
+  E2E_FORCE_DAEMON_HEALTH_UNREACHABLE_ENV,
   getProcessStartedAtMs,
   healthCheckDaemon,
   killStaleDaemon,
   parseLinuxBootTimeSeconds,
   parseLinuxProcStartTicks,
   parseDaemonPidFile,
-  startTimeMatches
+  parseWindowsProcessIdentityJson,
+  startTimeMatches,
+  startTimesWithinTolerance
 } from './daemon-health'
 import type { SubprocessHandle } from './session'
 
@@ -125,6 +129,45 @@ describe('daemon health', () => {
     await expect(healthCheckDaemon(socketPath, tokenPath)).resolves.toBe(false)
   })
 
+  it('returns unreachable when the e2e force-health-failure env is set', async () => {
+    // Why: prove the e2e seam short-circuits even when a real daemon would
+    // otherwise pass — not the already-covered missing-socket path.
+    const server = new DaemonServer({
+      socketPath,
+      tokenPath,
+      spawnSubprocess: () => createMockSubprocess()
+    })
+    await server.start()
+    vi.stubEnv(E2E_FORCE_DAEMON_HEALTH_UNREACHABLE_ENV, '1')
+    try {
+      await expect(checkDaemonHealth(socketPath, tokenPath)).resolves.toBe('unreachable')
+      await expect(healthCheckDaemon(socketPath, tokenPath)).resolves.toBe(false)
+    } finally {
+      vi.unstubAllEnvs()
+      await server.shutdown()
+    }
+  })
+
+  it('classifies a hello-rejected daemon as rejected, not unreachable', async () => {
+    // Why: 'rejected' means the daemon answered and refused adoption — the
+    // launcher may replace it. 'unreachable' also covers a wedged-but-live
+    // daemon, which must never be replaced while its pipe accepts connections.
+    const server = new DaemonServer({
+      socketPath,
+      tokenPath,
+      spawnSubprocess: () => createMockSubprocess()
+    })
+    await server.start()
+
+    try {
+      writeFileSync(tokenPath, 'not-the-daemon-token', { mode: 0o600 })
+      await expect(checkDaemonHealth(socketPath, tokenPath)).resolves.toBe('rejected')
+      await expect(healthCheckDaemon(socketPath, tokenPath)).resolves.toBe(false)
+    } finally {
+      await server.shutdown()
+    }
+  })
+
   it('does not unlink a live socket when the pid file does not match this daemon', async () => {
     if (process.platform === 'win32') {
       return
@@ -141,7 +184,9 @@ describe('daemon health', () => {
     writeFileSync(getDaemonPidPath(dir), String(process.pid), { mode: 0o600 })
 
     try {
-      await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toBe(false)
+      await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toMatchObject({
+        killed: false
+      })
       await expect(canConnect(socketPath)).resolves.toBe(true)
     } finally {
       await closeServer(server)
@@ -156,7 +201,11 @@ describe('parseDaemonPidFile', () => {
       pid: 12345,
       startedAtMs: 1_700_000_000_000,
       entryPath: null,
-      appVersion: null
+      appVersion: null,
+      launchNonce: null,
+      linuxStartTicks: null,
+      bootId: null,
+      spawnerExecPath: null
     })
   })
 
@@ -171,7 +220,26 @@ describe('parseDaemonPidFile', () => {
       pid: 12345,
       startedAtMs: 1_700_000_000_000,
       entryPath: '/repo/out/main/daemon-entry.js',
-      appVersion: '1.2.3'
+      appVersion: '1.2.3',
+      launchNonce: null,
+      linuxStartTicks: null,
+      bootId: null,
+      spawnerExecPath: null
+    })
+  })
+
+  it('preserves exact-incarnation launch and Linux process identity', () => {
+    const serialized = serializeDaemonPidFile({
+      pid: 12345,
+      startedAtMs: 1_700_000_000_000,
+      launchNonce: 'launch-a',
+      linuxStartTicks: '4242',
+      bootId: 'boot-a'
+    })
+    expect(parseDaemonPidFile(serialized)).toMatchObject({
+      launchNonce: 'launch-a',
+      linuxStartTicks: '4242',
+      bootId: 'boot-a'
     })
   })
 
@@ -182,7 +250,11 @@ describe('parseDaemonPidFile', () => {
       pid: 9999,
       startedAtMs: null,
       entryPath: null,
-      appVersion: null
+      appVersion: null,
+      launchNonce: null,
+      linuxStartTicks: null,
+      bootId: null,
+      spawnerExecPath: null
     })
   })
 
@@ -194,13 +266,21 @@ describe('parseDaemonPidFile', () => {
       pid: 12345,
       startedAtMs: null,
       entryPath: null,
-      appVersion: null
+      appVersion: null,
+      launchNonce: null,
+      linuxStartTicks: null,
+      bootId: null,
+      spawnerExecPath: null
     })
     expect(parseDaemonPidFile('  12345\n')).toEqual({
       pid: 12345,
       startedAtMs: null,
       entryPath: null,
-      appVersion: null
+      appVersion: null,
+      launchNonce: null,
+      linuxStartTicks: null,
+      bootId: null,
+      spawnerExecPath: null
     })
   })
 
@@ -286,6 +366,42 @@ describe('startTimeMatches', () => {
   })
 })
 
+describe('parseWindowsProcessIdentityJson', () => {
+  it('parses command line and start time from the CIM query output', () => {
+    expect(
+      parseWindowsProcessIdentityJson(
+        '{"cmd":"Orca.exe daemon-entry.js","start":1700000000000}\r\n'
+      )
+    ).toEqual({ commandLine: 'Orca.exe daemon-entry.js', startedAtMs: 1_700_000_000_000 })
+  })
+
+  it('returns a null start time when CreationDate was unavailable', () => {
+    expect(
+      parseWindowsProcessIdentityJson('{"cmd":"Orca.exe daemon-entry.js","start":null}')
+    ).toEqual({ commandLine: 'Orca.exe daemon-entry.js', startedAtMs: null })
+  })
+
+  it('returns null for a missing process or inaccessible command line', () => {
+    expect(parseWindowsProcessIdentityJson('')).toBeNull()
+    expect(parseWindowsProcessIdentityJson('   \r\n')).toBeNull()
+    expect(parseWindowsProcessIdentityJson('{"cmd":null,"start":123}')).toBeNull()
+    expect(parseWindowsProcessIdentityJson('not-json')).toBeNull()
+  })
+})
+
+describe('startTimesWithinTolerance', () => {
+  it('fails open when either side is null', () => {
+    expect(startTimesWithinTolerance(null, 1_700_000_000_000, 1_500)).toBe(true)
+    expect(startTimesWithinTolerance(1_700_000_000_000, null, 1_500)).toBe(true)
+    expect(startTimesWithinTolerance(null, null, 1_500)).toBe(true)
+  })
+
+  it('matches within tolerance and rejects outside it', () => {
+    expect(startTimesWithinTolerance(1_700_000_001_000, 1_700_000_000_000, 1_500)).toBe(true)
+    expect(startTimesWithinTolerance(1_700_000_005_000, 1_700_000_000_000, 1_500)).toBe(false)
+  })
+})
+
 describe('killStaleDaemon pid identity guards', () => {
   let dir: string
   let socketPath: string
@@ -322,13 +438,137 @@ describe('killStaleDaemon pid identity guards', () => {
     // signal is sent.
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true)
     try {
-      await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toBe(false)
+      await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toMatchObject({
+        killed: false
+      })
       const terminationSignals = killSpy.mock.calls.filter(
         ([, sig]) => sig === 'SIGTERM' || sig === 'SIGKILL'
       )
       expect(terminationSignals).toEqual([])
     } finally {
       killSpy.mockRestore()
+    }
+  })
+})
+
+describe('killStaleDaemon endpoint reclamation', () => {
+  let dir: string
+  let socketPath: string
+  let tokenPath: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'daemon-health-kill-test-'))
+    socketPath = daemonTestSocketPath(dir)
+    tokenPath = join(dir, 'daemon.token')
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  function listenOnSocketPath(server: Server, path: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(path, () => {
+        server.off('error', reject)
+        resolve()
+      })
+    })
+  }
+
+  it('preserves the pid record and the endpoint when the owner cannot be proven gone', async () => {
+    if (process.platform === 'win32') {
+      return
+    }
+
+    // Why: isDaemonProcess matches on the command line, so a child carrying the daemon
+    // entry plus this endpoint's paths is adopted as the recorded owner by the first probe.
+    const child = spawn(
+      process.execPath,
+      ['-e', 'setInterval(() => {}, 1000)', 'daemon-entry', socketPath, tokenPath],
+      { stdio: 'ignore' }
+    )
+    await new Promise<void>((resolve, reject) => {
+      child.once('spawn', resolve)
+      child.once('error', reject)
+    })
+    const childPid = child.pid as number
+    const childExited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
+    const server = createServer((socket) => socket.end())
+    await listenOnSocketPath(server, socketPath)
+    writeFileSync(
+      getDaemonPidPath(dir),
+      serializeDaemonPidFile({ pid: childPid, startedAtMs: null }),
+      { mode: 0o600 }
+    )
+
+    const realKill = process.kill.bind(process)
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true)
+    // Why: the recorded owner vanishes mid-wait, so the pre-SIGKILL identity re-probe
+    // fails and only the still-answering endpoint proves a daemon is alive.
+    const identityBreaker = setTimeout(() => realKill(childPid, 'SIGKILL'), 800)
+    try {
+      await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
+        killed: false,
+        liveOwnerSurvived: true
+      })
+      expect(existsSync(getDaemonPidPath(dir))).toBe(true)
+      expect(existsSync(socketPath)).toBe(true)
+      await expect(canConnect(socketPath)).resolves.toBe(true)
+    } finally {
+      clearTimeout(identityBreaker)
+      killSpy.mockRestore()
+      try {
+        realKill(childPid, 'SIGKILL')
+      } catch {
+        // Already gone.
+      }
+      await childExited
+      await closeServer(server)
+    }
+  })
+
+  it('unlinks a stale endpoint file once connects to it are refused', async () => {
+    if (process.platform === 'win32') {
+      return
+    }
+
+    // Why: hard-linking the bound inode leaves the endpoint name behind after the
+    // listener closes — exactly the entry a crashed daemon leaves for connect to refuse.
+    const bindPath = join(dir, '.bstale')
+    const server = createServer((socket) => socket.end())
+    await listenOnSocketPath(server, bindPath)
+    linkSync(bindPath, socketPath)
+    await closeServer(server)
+
+    await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
+      killed: false,
+      liveOwnerSurvived: false
+    })
+    expect(existsSync(socketPath)).toBe(false)
+  })
+
+  it('keeps the endpoint file when the connect probe neither connects nor is refused', async () => {
+    if (process.platform === 'win32') {
+      return
+    }
+
+    writeFileSync(socketPath, '')
+    // A connect that never settles leaves the probe to time out, which is not proof
+    // the endpoint is dead — net.connect itself cannot be spied on in ESM.
+    const connectSpy = vi
+      .spyOn(Socket.prototype, 'connect')
+      .mockImplementation(function (this: Socket) {
+        return this
+      })
+    try {
+      await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
+        killed: false,
+        liveOwnerSurvived: false
+      })
+      expect(existsSync(socketPath)).toBe(true)
+    } finally {
+      connectSpy.mockRestore()
     }
   })
 })

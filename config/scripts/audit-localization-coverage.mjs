@@ -3,7 +3,8 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import process from 'node:process'
 
-import ts from 'typescript'
+// TypeScript 7 is a native CLI; AST consumers still need the legacy JavaScript API.
+import ts from 'typescript-api'
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts'])
 const SKIP_PATH_PARTS = new Set(['.git', 'dist', 'node_modules', 'out', '__snapshots__', 'assets'])
@@ -59,6 +60,14 @@ const USER_VISIBLE_OBJECT_METHODS = new Set([
   'warning'
 ])
 const USER_VISIBLE_OBJECT_NAMES = new Set(['toast'])
+// Why: only comparison operands are code, not copy. Bailing on every non-`+`
+// operator hid whole subtrees behind `cond && <JSX/>` guards and `?? 'fallback'`.
+const COPY_PRESERVING_BINARY_OPERATORS = new Set([
+  ts.SyntaxKind.PlusToken,
+  ts.SyntaxKind.QuestionQuestionToken,
+  ts.SyntaxKind.BarBarToken,
+  ts.SyntaxKind.AmpersandAmpersandToken
+])
 
 function normalizePath(root, filePath) {
   return path.relative(root, filePath).split(path.sep).join('/')
@@ -225,7 +234,7 @@ function isRenderedJsxExpression(node) {
       continue
     }
     if (ts.isBinaryExpression(current)) {
-      if (current.operatorToken.kind !== ts.SyntaxKind.PlusToken) {
+      if (!COPY_PRESERVING_BINARY_OPERATORS.has(current.operatorToken.kind)) {
         return false
       }
       current = current.parent
@@ -317,7 +326,8 @@ function classifyStringNode(node) {
     findAncestor(
       node,
       (ancestor) =>
-        ts.isBinaryExpression(ancestor) && ancestor.operatorToken.kind !== ts.SyntaxKind.PlusToken
+        ts.isBinaryExpression(ancestor) &&
+        !COPY_PRESERVING_BINARY_OPERATORS.has(ancestor.operatorToken.kind)
     )
   ) {
     return undefined

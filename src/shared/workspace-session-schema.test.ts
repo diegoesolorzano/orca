@@ -14,6 +14,55 @@ describe('parseWorkspaceSession', () => {
     expect(result.ok).toBe(true)
   })
 
+  it('preserves external SSH file ownership across session parsing', () => {
+    const result = parseWorkspaceSession({
+      activeRepoId: null,
+      activeWorktreeId: 'wt',
+      activeTabId: null,
+      tabsByWorktree: {},
+      terminalLayoutsByTabId: {},
+      openFilesByWorktree: {
+        wt: [
+          {
+            filePath: '/tmp/external.png',
+            relativePath: '/tmp/external.png',
+            worktreeId: 'wt',
+            language: 'png',
+            externalSshTargetId: 'ssh-1'
+          }
+        ]
+      }
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.openFilesByWorktree?.wt?.[0]?.externalSshTargetId).toBe('ssh-1')
+    }
+  })
+
+  it('rejects blank external SSH file ownership', () => {
+    const result = parseWorkspaceSession({
+      activeRepoId: null,
+      activeWorktreeId: 'wt',
+      activeTabId: null,
+      tabsByWorktree: {},
+      terminalLayoutsByTabId: {},
+      openFilesByWorktree: {
+        wt: [
+          {
+            filePath: '/tmp/external.png',
+            relativePath: '/tmp/external.png',
+            worktreeId: 'wt',
+            language: 'png',
+            externalSshTargetId: '   '
+          }
+        ]
+      }
+    })
+
+    expect(result.ok).toBe(false)
+  })
+
   it('accepts a fully populated session with optional fields', () => {
     const result = parseWorkspaceSession({
       activeRepoId: 'repo1',
@@ -186,6 +235,11 @@ describe('parseWorkspaceSession', () => {
             title: 'Claude working',
             defaultTitle: 'Terminal 1',
             generatedTitle: 'Refactor auth',
+            aiVaultTitle: {
+              agent: 'codex',
+              sessionId: 'session-1',
+              title: 'Provider thread name'
+            },
             customTitle: null,
             color: null,
             sortOrder: 0,
@@ -204,6 +258,11 @@ describe('parseWorkspaceSession', () => {
             contentType: 'terminal',
             label: 'Claude working',
             generatedLabel: 'Refactor auth',
+            aiVaultTitle: {
+              agent: 'codex',
+              sessionId: 'session-1',
+              title: 'Provider thread name'
+            },
             customLabel: null,
             color: null,
             sortOrder: 0,
@@ -216,7 +275,56 @@ describe('parseWorkspaceSession', () => {
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.value.tabsByWorktree.wt[0].generatedTitle).toBe('Refactor auth')
+      expect(result.value.tabsByWorktree.wt[0].aiVaultTitle?.title).toBe('Provider thread name')
       expect(result.value.unifiedTabs?.wt[0].generatedLabel).toBe('Refactor auth')
+      expect(result.value.unifiedTabs?.wt[0].aiVaultTitle?.title).toBe('Provider thread name')
+    }
+  })
+
+  it('drops malformed AI Vault titles without rejecting the workspace session', () => {
+    const result = parseWorkspaceSession({
+      activeRepoId: null,
+      activeWorktreeId: 'wt',
+      activeTabId: 'tab1',
+      tabsByWorktree: {
+        wt: [
+          {
+            id: 'tab1',
+            ptyId: null,
+            worktreeId: 'wt',
+            title: 'Codex',
+            aiVaultTitle: { agent: 'future-agent', sessionId: 'session-1', title: 'Name' },
+            customTitle: null,
+            color: null,
+            sortOrder: 0,
+            createdAt: 0
+          }
+        ]
+      },
+      terminalLayoutsByTabId: {},
+      unifiedTabs: {
+        wt: [
+          {
+            id: 'tab1',
+            entityId: 'tab1',
+            groupId: 'group1',
+            worktreeId: 'wt',
+            contentType: 'terminal',
+            label: 'Codex',
+            aiVaultTitle: 'malformed',
+            customLabel: null,
+            color: null,
+            sortOrder: 0,
+            createdAt: 0
+          }
+        ]
+      }
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.tabsByWorktree.wt[0].aiVaultTitle).toBeUndefined()
+      expect(result.value.unifiedTabs?.wt[0].aiVaultTitle).toBeUndefined()
     }
   })
 

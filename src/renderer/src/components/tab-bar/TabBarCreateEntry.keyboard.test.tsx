@@ -5,12 +5,15 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TabEntryOption } from './tab-create-entry-action'
 import type { TabAgentLaunchOption } from './tab-agent-launch-options'
+import { TooltipProvider } from '@/components/ui/tooltip'
 
 // Why: the real entry-action module pulls in runtime IPC + the app store; the
 // keyboard behavior under test only needs a controllable option list.
 const entryOptionsMock = vi.hoisted(() => ({ options: [] as TabEntryOption[] }))
 vi.mock('./tab-create-entry-action', () => ({
-  getTabEntryOptions: () => entryOptionsMock.options
+  getTabEntryOptions: () => entryOptionsMock.options,
+  createTabEntryAllowAbsolutePathsSelector: () => () => true,
+  isTabEntryAbsolutePathLike: () => false
 }))
 vi.mock('../quick-open-file-list', () => ({
   useRuntimeFileListForWorktree: () => ({ files: [], loading: false, loadError: null })
@@ -35,7 +38,8 @@ let root: Root
 
 function mount(node: React.JSX.Element): void {
   act(() => {
-    root.render(node)
+    // Result rows carry a path tooltip, which Radix requires a provider for.
+    root.render(<TooltipProvider>{node}</TooltipProvider>)
   })
 }
 
@@ -88,6 +92,26 @@ afterEach(() => {
 })
 
 describe('TabBarCreateEntry keyboard navigation', () => {
+  it('publishes the query from the typing event without an extra effect commit', () => {
+    const onQueryChange = vi.fn()
+    mount(
+      <TabBarCreateEntry
+        worktreeId="wt"
+        groupId="g"
+        menuOpen
+        onOpenEntry={vi.fn()}
+        onQueryChange={onQueryChange}
+      />
+    )
+
+    expect(onQueryChange).not.toHaveBeenCalled()
+
+    setQuery('src/app.ts')
+
+    expect(onQueryChange).toHaveBeenCalledTimes(1)
+    expect(onQueryChange).toHaveBeenCalledWith('src/app.ts')
+  })
+
   it('intercepts ArrowDown on a single-option list so it does not leak (guards >0 vs >1)', () => {
     entryOptionsMock.options = [fileOption('src/only-match.ts')]
     const onOpenEntry = vi.fn().mockResolvedValue(undefined)

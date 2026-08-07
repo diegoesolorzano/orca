@@ -29,9 +29,9 @@ import {
   MIN_COMPATIBLE_RUNTIME_SERVER_VERSION,
   RUNTIME_PROTOCOL_VERSION
 } from '../../../shared/protocol-version'
-import type { GitHubWorkItem, SetupDecision } from '../../../shared/types'
-import type { Repo } from '../../../shared/types'
+import type { GitHubWorkItem, SetupDecision, Repo } from '../../../shared/types'
 import type { TaskSourceContext, WorkspaceRunContext } from '../../../shared/task-source-context'
+import { resolveGitHubWorkItemIdentity } from '@/lib/github-work-item-identity'
 
 export type BackgroundGitHubWorkItemCreateResult =
   | { kind: 'background-started' }
@@ -182,6 +182,7 @@ export async function createGitHubWorkItemWorkspaceInBackground(
 
   const restoreView = deps.getActiveView()
   const creationId = deps.beginBackgroundCreate(initialRequest)
+  const itemIdentity = resolveGitHubWorkItemIdentity(args.item)
 
   try {
     const repoOwnerSettings = getSettingsForRepoRuntimeOwner(store, args.repoId)
@@ -201,11 +202,11 @@ export async function createGitHubWorkItemWorkspaceInBackground(
     let pushTarget: WorktreeCreationRequest['pushTarget']
     let branchNameOverride: string | undefined
     let compareBaseRef: string | undefined
-    if (args.item.type === 'pr' && args.item.number) {
+    if (itemIdentity.type === 'pr' && itemIdentity.number) {
       try {
         const result = await deps.resolvePrStartPoint(
           args.repoId,
-          args.item.number,
+          itemIdentity.number,
           repoOwnerSettings,
           args.item
         )
@@ -240,12 +241,13 @@ export async function createGitHubWorkItemWorkspaceInBackground(
     if (!deps.hasPendingCreate(creationId)) {
       return { kind: 'background-started' }
     }
-    const { startupPlan, quickPrompt, quickTelemetry } = buildGitHubWorkItemStartupPlan({
-      agent,
-      item: args.item,
-      repo,
-      store
-    })
+    const { startupPlan, quickPrompt, launchDraftPrompt, quickTelemetry } =
+      buildGitHubWorkItemStartupPlan({
+        agent,
+        item: args.item,
+        repo,
+        store
+      })
     if (agent && !startupPlan) {
       deps.toastError(agentLaunchCommandErrorMessage())
       abandonStagedCreate(creationId, restoreView, deps)
@@ -309,6 +311,7 @@ export async function createGitHubWorkItemWorkspaceInBackground(
       ...(issueCommand ? { issueCommand } : {}),
       startupPlan,
       quickPrompt,
+      ...(launchDraftPrompt ? { launchDraftPrompt } : {}),
       quickTelemetry
     }
 

@@ -57,8 +57,6 @@ function renderMenu(overrides: Record<string, unknown> = {}): void {
     canClosePane: true,
     canExpandPane: true,
     menuPaneIsExpanded: false,
-    linkUrl: null,
-    onOpenLinkInDefaultBrowser: vi.fn(),
     onCopy: vi.fn(),
     onPaste: vi.fn(),
     onSplitRight: vi.fn(),
@@ -68,6 +66,8 @@ function renderMenu(overrides: Record<string, unknown> = {}): void {
     onEqualizePaneSizes: vi.fn(),
     onClosePane: vi.fn(),
     onClearScreen: vi.fn(),
+    canContinueAgentSessionInNewSession: false,
+    onContinueAgentSessionInNewSession: vi.fn(),
     onForkAgentSession: vi.fn(),
     canToggleNativeChat: false,
     isNativeChatView: false,
@@ -116,22 +116,20 @@ describe('TerminalContextMenu', () => {
     expect(onForkAgentSession).not.toHaveBeenCalled()
   })
 
-  it('shows "Open in Default Browser" only when a link is under the cursor', () => {
-    renderMenu({ linkUrl: null })
-    expect(
-      items.list.some((item) => childrenText(item.children) === 'Open in Default Browser')
-    ).toBe(false)
+  it('shows new-session continuation only for eligible agent panes', () => {
+    const onContinueAgentSessionInNewSession = vi.fn()
+    renderMenu({
+      canContinueAgentSessionInNewSession: true,
+      onContinueAgentSessionInNewSession
+    })
 
-    items.list = []
-    const onOpenLinkInDefaultBrowser = vi.fn()
-    renderMenu({ linkUrl: 'https://example.com/docs', onOpenLinkInDefaultBrowser })
-
-    const openLinkItem = items.list.find(
-      (item) => childrenText(item.children) === 'Open in Default Browser'
+    const handoffItem = items.list.find(
+      (item) => childrenText(item.children) === 'Continue in New Session…'
     )
-    expect(openLinkItem).toBeDefined()
-    openLinkItem?.onSelect?.()
-    expect(onOpenLinkInDefaultBrowser).toHaveBeenCalledTimes(1)
+    expect(handoffItem).toBeDefined()
+
+    handoffItem?.onSelect?.()
+    expect(onContinueAgentSessionInNewSession).toHaveBeenCalledTimes(1)
   })
 
   it('shows one shortcut per terminal menu action on Windows', () => {

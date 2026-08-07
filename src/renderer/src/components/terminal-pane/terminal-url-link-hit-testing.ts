@@ -1,53 +1,35 @@
 import type { IBufferLine, IBufferRange, IDisposable, Terminal } from '@xterm/xterm'
-import { openHttpLink } from '@/lib/http-link-routing'
-import { buildCandidateLogicalLinesForBufferPosition } from './terminal-file-link-hit-testing'
-import { isTerminalLinkActivation } from './terminal-link-activation'
-import { rangeForParsedFileLink } from './wrapped-terminal-link-ranges'
+import { openHttpLink, type HttpLinkSourceOwner } from '@/lib/http-link-routing'
+import { buildEdgeWrappedHttpLogicalLineCandidates } from './edge-wrapped-terminal-http-links'
+import { buildHardWrappedHttpLogicalLineCandidates } from './hard-wrapped-terminal-http-links'
+import { dedupeLogicalLines } from './terminal-file-link-hit-testing'
+import { isTerminalHttpLinkActivation } from './terminal-http-link-activation'
+import { installTerminalLinkPtyMouseSuppression } from './terminal-link-pty-mouse-suppression'
+import { getTerminalBufferPositionForMouseEvent } from './terminal-mouse-buffer-position'
+import { extractTerminalHttpLinks } from './terminal-http-url-extraction'
+import { buildWrappedLogicalLine, rangeForParsedFileLink } from './wrapped-terminal-link-ranges'
+import { isTerminalLinkifierHoverActive } from '@/lib/pane-manager/terminal-linkifier-hover-reset'
+
+export { extractTerminalHttpLinks } from './terminal-http-url-extraction'
+export { TERMINAL_HTTP_URL_MAX_LENGTH } from './terminal-http-link-limits'
 
 type UrlLinkHitTestDeps = {
   worktreeId: string
-  forceSystemBrowser?: boolean
+  sourceOwner?: HttpLinkSourceOwner
+  modifierHeld?: boolean
   requestOpenLinksInAppPreference?: TerminalLinkRoutingPreferenceRequester
 }
 
 type UrlLinkClickFallbackDeps = {
   worktreeId: string
+  /** Resolved per click: the pane's PTY (and its runtime binding) may not exist at install time. */
+  getSourceOwner?: () => HttpLinkSourceOwner
   requestOpenLinksInAppPreference?: TerminalLinkRoutingPreferenceRequester
 }
 
 export type TerminalLinkRoutingPreferenceRequester = (
   url: string
 ) => boolean | Promise<boolean> | null | undefined
-
-type ParsedTerminalHttpLink = {
-  url: string
-  startIndex: number
-  endIndex: number
-}
-
-const HTTP_SCHEME_PREFIXES = ['https://', 'http://'] as const
-export const TERMINAL_HTTP_URL_MAX_LENGTH = 2048
-
-export function extractTerminalHttpLinks(lineText: string): ParsedTerminalHttpLink[] {
-  const links: ParsedTerminalHttpLink[] = []
-  for (const candidate of iterateTerminalHttpUrlCandidates(lineText)) {
-    let parsed: URL
-    try {
-      parsed = new URL(candidate.url)
-    } catch {
-      continue
-    }
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      continue
-    }
-    links.push({
-      url: parsed.toString(),
-      startIndex: candidate.startIndex,
-      endIndex: candidate.endIndex
-    })
-  }
-  return links
-}
 
 function isDesktopHttpLinkFallbackActivation(event: MouseEvent): boolean {
   if (event.defaultPrevented || event.button !== 0) {
@@ -56,187 +38,49 @@ function isDesktopHttpLinkFallbackActivation(event: MouseEvent): boolean {
   // Why: desktop terminal links require an intentional Cmd/Ctrl gesture so
   // plain clicks remain available for cursor placement and selection. Mobile
   // tap routing is handled separately under mobile/src/terminal.
-  return isTerminalLinkActivation(event)
+  return isTerminalHttpLinkActivation(event)
 }
 
-function* iterateTerminalHttpUrlCandidates(
-  lineText: string
-): Generator<{ url: string; startIndex: number; endIndex: number }> {
-  let searchStart = 0
-  while (searchStart < lineText.length) {
-    const startIndex = findNextHttpSchemeIndex(lineText, searchStart)
-    if (startIndex === -1) {
-      return
-    }
-
-    if (!hasHttpUrlWordBoundary(lineText, startIndex)) {
-      searchStart = startIndex + 1
-      continue
-    }
-
-    const rawEndIndex = findHttpUrlCandidateEnd(lineText, startIndex)
-    const endIndex = trimHttpUrlTrailingPunctuation(lineText, startIndex, rawEndIndex)
-    searchStart = Math.max(rawEndIndex, startIndex + 1)
-    if (endIndex <= startIndex || rawEndIndex - startIndex > TERMINAL_HTTP_URL_MAX_LENGTH) {
-      continue
-    }
-
-    yield {
-      url: lineText.slice(startIndex, endIndex),
-      startIndex,
-      endIndex
-    }
-  }
-}
-
-function findNextHttpSchemeIndex(lineText: string, searchStart: number): number {
-  let nextIndex = -1
-  for (const prefix of HTTP_SCHEME_PREFIXES) {
-    const candidateIndex = lineText.indexOf(prefix, searchStart)
-    if (candidateIndex !== -1 && (nextIndex === -1 || candidateIndex < nextIndex)) {
-      nextIndex = candidateIndex
-    }
-  }
-  return nextIndex
-}
-
-function hasHttpUrlWordBoundary(lineText: string, startIndex: number): boolean {
-  return startIndex === 0 || !isAsciiWordCode(lineText.charCodeAt(startIndex - 1))
-}
-
-function findHttpUrlCandidateEnd(lineText: string, startIndex: number): number {
-  const scanEnd = Math.min(lineText.length, startIndex + TERMINAL_HTTP_URL_MAX_LENGTH + 1)
-  for (let index = startIndex; index < scanEnd; index += 1) {
-    if (isHttpUrlBodyTerminator(lineText.charCodeAt(index))) {
-      return index
-    }
-  }
-  return scanEnd
-}
-
-function trimHttpUrlTrailingPunctuation(
-  lineText: string,
-  startIndex: number,
-  rawEndIndex: number
-): number {
-  let endIndex = rawEndIndex
-  while (endIndex > startIndex && isHttpUrlTrailingPunctuation(lineText.charCodeAt(endIndex - 1))) {
-    endIndex -= 1
-  }
-  return endIndex
-}
-
-function isHttpUrlBodyTerminator(code: number): boolean {
-  return (
-    isAsciiWhitespace(code) ||
-    code === 0x22 ||
-    code === 0x27 ||
-    code === 0x21 ||
-    code === 0x2a ||
-    code === 0x28 ||
-    code === 0x29 ||
-    code === 0x7b ||
-    code === 0x7d ||
-    code === 0x7c ||
-    code === 0x5c ||
-    code === 0x5e ||
-    code === 0x3c ||
-    code === 0x3e ||
-    code === 0x60
-  )
-}
-
-function isHttpUrlTrailingPunctuation(code: number): boolean {
-  return (
-    isAsciiWhitespace(code) ||
-    code === 0x22 ||
-    code === 0x27 ||
-    code === 0x3a ||
-    code === 0x2c ||
-    code === 0x2e ||
-    code === 0x21 ||
-    code === 0x3f ||
-    code === 0x7b ||
-    code === 0x7d ||
-    code === 0x7c ||
-    code === 0x5c ||
-    code === 0x5e ||
-    code === 0x7e ||
-    code === 0x5b ||
-    code === 0x5d ||
-    code === 0x28 ||
-    code === 0x29 ||
-    code === 0x3c ||
-    code === 0x3e ||
-    code === 0x60
-  )
-}
-
-function isAsciiWhitespace(code: number): boolean {
-  return code === 9 || code === 10 || code === 11 || code === 12 || code === 13 || code === 32
-}
-
-function isAsciiWordCode(code: number): boolean {
-  return (
-    (code >= 48 && code <= 57) ||
-    (code >= 65 && code <= 90) ||
-    code === 95 ||
-    (code >= 97 && code <= 122)
-  )
-}
-
-function getTerminalScreenElement(terminal: Terminal): HTMLElement | null {
-  return terminal.element?.querySelector('.xterm-screen') ?? null
-}
-
-function getBufferPositionForTerminalMouseEvent(
+export function openHttpLinkAtTerminalMouseEvent(
   terminal: Terminal,
-  event: Pick<MouseEvent, 'clientX' | 'clientY'>
-): { x: number; y: number } | null {
-  const screenElement = getTerminalScreenElement(terminal)
-  if (!screenElement || terminal.cols <= 0 || terminal.rows <= 0) {
-    return null
+  event: MouseEvent,
+  deps: UrlLinkHitTestDeps
+): boolean {
+  if (event.button !== 0 || !isTerminalHttpLinkActivation(event)) {
+    return false
   }
-
-  const rect = screenElement.getBoundingClientRect()
-  const relativeX = event.clientX - rect.left
-  const relativeY = event.clientY - rect.top
-  if (relativeX < 0 || relativeY < 0 || relativeX >= rect.width || relativeY >= rect.height) {
-    return null
+  const position = getTerminalBufferPositionForMouseEvent(terminal, event)
+  if (!position) {
+    return false
   }
-
-  const cellWidth = rect.width / terminal.cols
-  const cellHeight = rect.height / terminal.rows
-  if (cellWidth <= 0 || cellHeight <= 0) {
-    return null
-  }
-
-  return {
-    x: Math.floor(relativeX / cellWidth) + 1,
-    y: Math.floor(relativeY / cellHeight) + terminal.buffer.active.viewportY + 1
-  }
+  return openHttpLinkAtBufferPosition(terminal.buffer.active, position, terminal.cols, deps)
 }
 
 export function installHttpLinkClickFallback(
   terminal: Terminal,
   deps: UrlLinkClickFallbackDeps
 ): IDisposable {
+  const ptyMouseSuppression = installTerminalLinkPtyMouseSuppression(terminal, (event) => {
+    if (isTerminalLinkifierHoverActive(terminal)) {
+      return true
+    }
+    const position = getTerminalBufferPositionForMouseEvent(terminal, event)
+    return Boolean(
+      position && findHttpLinkAtBufferPosition(terminal.buffer.active, position, terminal.cols)
+    )
+  })
   const handleMouseUp = (event: MouseEvent): void => {
     if (!isDesktopHttpLinkFallbackActivation(event)) {
-      return
-    }
-
-    const position = getBufferPositionForTerminalMouseEvent(terminal, event)
-    if (!position) {
       return
     }
 
     // Why: xterm's WebLinksAddon only activates after hover state exists. This
     // direct mouseup fallback preserves modifier-clicks when the hover link was
     // never established, while defaultPrevented avoids duplicate opens.
-    const opened = openHttpLinkAtBufferPosition(terminal.buffer.active, position, terminal.cols, {
+    const opened = openHttpLinkAtTerminalMouseEvent(terminal, event, {
       worktreeId: deps.worktreeId,
-      forceSystemBrowser: event.shiftKey,
+      sourceOwner: deps.getSourceOwner?.() ?? { kind: 'local' },
+      modifierHeld: event.shiftKey,
       requestOpenLinksInAppPreference: deps.requestOpenLinksInAppPreference
     })
     if (opened) {
@@ -249,6 +93,7 @@ export function installHttpLinkClickFallback(
   terminalElement?.addEventListener('mouseup', handleMouseUp)
   return {
     dispose: () => {
+      ptyMouseSuppression.dispose()
       terminalElement?.removeEventListener('mouseup', handleMouseUp)
     }
   }
@@ -260,32 +105,30 @@ export function openHttpLinkAtBufferPosition(
   terminalColumns: number,
   deps: UrlLinkHitTestDeps
 ): boolean {
-  const url = getTerminalHttpLinkAtBufferPosition(buffer, position, terminalColumns)
+  const url = findHttpLinkAtBufferPosition(buffer, position, terminalColumns)
   if (!url) {
     return false
   }
-
   openTerminalHttpLink(url, deps)
   return true
 }
 
-export function getTerminalHttpLinkForMouseEvent(
-  terminal: Terminal,
-  event: Pick<MouseEvent, 'clientX' | 'clientY'>
-): string | null {
-  const position = getBufferPositionForTerminalMouseEvent(terminal, event)
-  if (!position) {
-    return null
-  }
-  return getTerminalHttpLinkAtBufferPosition(terminal.buffer.active, position, terminal.cols)
-}
-
-export function getTerminalHttpLinkAtBufferPosition(
+function findHttpLinkAtBufferPosition(
   buffer: { getLine(y: number): IBufferLine | undefined },
   position: { x: number; y: number },
   terminalColumns: number
 ): string | null {
-  const logicalLines = buildCandidateLogicalLinesForBufferPosition(buffer, position.y)
+  const nativeWrappedLogicalLine = buildWrappedLogicalLine(buffer, position.y)
+  const logicalLines = dedupeLogicalLines([
+    ...(nativeWrappedLogicalLine && nativeWrappedLogicalLine.rows.length > 1
+      ? [nativeWrappedLogicalLine]
+      : []),
+    ...buildHardWrappedHttpLogicalLineCandidates(buffer, position.y),
+    ...buildEdgeWrappedHttpLogicalLineCandidates(buffer, position.y),
+    ...(nativeWrappedLogicalLine && nativeWrappedLogicalLine.rows.length === 1
+      ? [nativeWrappedLogicalLine]
+      : [])
+  ])
   if (logicalLines.length === 0) {
     return null
   }
@@ -303,15 +146,34 @@ export function getTerminalHttpLinkAtBufferPosition(
   return null
 }
 
+function rangeContainsBufferPosition(
+  range: IBufferRange,
+  position: { x: number; y: number },
+  terminalColumns: number
+): boolean {
+  const lower = range.start.y * terminalColumns + range.start.x
+  const upper = range.end.y * terminalColumns + range.end.x
+  const current = position.y * terminalColumns + position.x
+  return lower <= current && current <= upper
+}
+
 export function openTerminalHttpLink(url: string, deps: UrlLinkHitTestDeps): void {
-  if (deps.forceSystemBrowser) {
-    openHttpLink(url, { worktreeId: deps.worktreeId, forceSystemBrowser: true })
+  // Why: Orca browser tabs are local-only, so a link clicked in a runtime-hosted
+  // pane must be classified by its pane's host, not the global active runtime.
+  const sourceOwner = deps.sourceOwner ?? { kind: 'local' }
+  if (deps.modifierHeld) {
+    // Why: the modifier states a destination outright, so it also skips the
+    // one-time routing prompt; openHttpLink resolves which destination it means.
+    openHttpLink(url, { worktreeId: deps.worktreeId, modifierHeld: true, sourceOwner })
     return
   }
 
-  const preferenceDecision = deps.requestOpenLinksInAppPreference?.(url)
+  // Why: a runtime-hosted link can only reach the system browser, so prompting
+  // would persist an in-app preference this click cannot honor.
+  const preferenceDecision =
+    sourceOwner.kind === 'local' ? deps.requestOpenLinksInAppPreference?.(url) : null
   if (preferenceDecision === null || preferenceDecision === undefined) {
-    openHttpLink(url, { worktreeId: deps.worktreeId })
+    openHttpLink(url, { worktreeId: deps.worktreeId, sourceOwner })
     return
   }
 
@@ -322,21 +184,11 @@ export function openTerminalHttpLink(url: string, deps: UrlLinkHitTestDeps): voi
     .then((openInOrca) => {
       openHttpLink(url, {
         worktreeId: deps.worktreeId,
-        forceSystemBrowser: !openInOrca
+        forceSystemBrowser: !openInOrca,
+        sourceOwner
       })
     })
     .catch(() => {
-      openHttpLink(url, { worktreeId: deps.worktreeId, forceSystemBrowser: true })
+      openHttpLink(url, { worktreeId: deps.worktreeId, forceSystemBrowser: true, sourceOwner })
     })
-}
-
-function rangeContainsBufferPosition(
-  range: IBufferRange,
-  position: { x: number; y: number },
-  terminalColumns: number
-): boolean {
-  const lower = range.start.y * terminalColumns + range.start.x
-  const upper = range.end.y * terminalColumns + range.end.x
-  const current = position.y * terminalColumns + position.x
-  return lower <= current && current <= upper
 }
