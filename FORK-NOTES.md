@@ -58,7 +58,19 @@ así el proceso se llama `kimi`/`minimax`/`zai` en vez de `claude` y Orca los di
   (`promptInjectionMode:'argv'` + `--prefill`, porque por debajo ES Claude Code),
   `src/shared/agent-kind.ts`, `src/shared/telemetry-events.ts` (`AGENT_KIND_VALUES`),
   `src/shared/tui-agent-selection.ts`, `src/renderer/src/lib/agent-catalog.tsx`,
-  `src/renderer/src/lib/agent-status.ts` (record de iconos).
+  `src/renderer/src/lib/agent-status.ts` (record de iconos),
+  `src/shared/tui-agent-display-names.ts`, y `src/shared/skills-cli-agent-keys.ts`
+  (`Record<TuiAgent, string|null>`; para los wrappers va **`null`**: cada uno apunta
+  `CLAUDE_CONFIG_DIR` a su propio dir, así que el target `claude-code` escribiría las
+  skills donde nunca las leen).
+- El ícono NO se empaqueta: `agent-catalog.tsx` declara `faviconDomain` (ej. `z.ai`) y
+  Orca arma `https://www.google.com/s2/favicons?domain=<dominio>` — el logo lo sirve el
+  sitio del proveedor. Requiere red; sin ella cae al placeholder.
+- **Ojo con los `switch` sin `default`:** el fork agrega la acción `redrawActivePane`
+  (Mod+Alt+L) a `TerminalShortcutAction`. Archivos nuevos de upstream que hacen switch
+  exhaustivo sobre esa unión SIN `default` (hoy
+  `components/dashboard-popout/preview-terminal-key-handler.ts`) rompen el typecheck
+  hasta clasificar la acción del fork. El typecheck lo caza; no es opcional.
 - NO se tocó el subsistema de rate-limits/cuotas (fetcher propio de cada proveedor):
   MiniMax no expone esa API, así que no aparece en el panel de uso del status bar.
 - Genera conflicto menor de merge en `types.ts`/`tui-agent-config.ts` al traer upstream;
@@ -111,10 +123,25 @@ Tres ajustes en `src/renderer/src/components/activity/ActivityPrototypePage.tsx`
 2. **El selector Status/Project/Worktree/Agent persiste.** Era `useState('status')`
    puro → se reseteaba al desmontar/montar el panel. Ahora se guarda en `localStorage`
    (`orca.activity.groupBy`) vía `readPersistedActivityGroupBy`/`writePersistedActivityGroupBy`.
-3. **Renombrar la sesión desde la fila.** Doble clic en el título de una fila
-   (`ThreadRow`) abre un input inline; Enter confirma vía `setTabCustomTitle(tab.id, …,
-   { recordInteraction: true })`, Escape cancela. Reusa el mismo `customTitle` que ya
-   gana en `paneTitleForEntry` (y en el tab bar). Copia i18n: `fork.activity.renameSession`.
+3. **Renombrar la sesión desde la fila.** Doble clic en la línea del *task title* de
+   una fila (`ThreadRow`) abre un input inline; Enter confirma vía
+   `setTabCustomTitle(tab.id, …, { recordInteraction: true })`, Escape cancela. Reusa
+   el mismo `customTitle` que ya gana en `paneTitleForEntry` (y en el tab bar).
+   Copia i18n: `fork.activity.renameSession`.
+   - **`ThreadRow` es de upstream y lo rediseñan seguido** (en 1.4.176 pasó a
+     workspaceTitle como línea principal + taskTitle secundaria + `ActivityProjectLabel`).
+     Estrategia de merge: **tomar el `ThreadRow` de upstream completo** y reaplicar
+     encima solo los hooks de rename y el bloque del taskTitle. No intentar conservar
+     el layout viejo del fork.
+   - Upstream renderiza la línea de taskTitle solo si difiere del workspaceTitle; el
+     fork la renderiza también mientras `isRenaming`, si no el rename desaparecería
+     justo en las filas donde coinciden.
+
+### Prerrequisito: los wrappers deben emitir hooks
+
+El ícono del tab (reconocimiento por proceso) es INDEPENDIENTE de aparecer en el panel.
+Ver la sección de agentes: sin `scripts/fork-sync-provider-hooks.sh` los wrappers NO
+aparecen en Actividad aunque el agrupado por Agente esté bien resuelto.
 
 ## Parche de producto: sidebar — sin branch duplicado en título y subtítulo
 
@@ -146,22 +173,71 @@ que **Cmd+Q siempre pida confirmación**, con **cancelación segura**.
 - Flujo: `app before-quit` → `window 'close'` (preventDefault) → IPC `window:close-requested`
   `{isQuitting}` → el renderer muestra el diálogo → `window:confirm-close` (cerrar) o
   `window:quit-aborted` (cancelar).
-- Cancelación segura: el teardown de servicios (`rateLimits.stop()`, `agentAwakeService`)
-  se movió de `before-quit` a `will-quit`, que solo corre en una salida real. `before-quit`
-  deja solo el latch reversible `isQuitting=true`; `window:quit-aborted` lo limpia vía
-  `onQuitAborted`. Así cancelar un Cmd+Q deja Orca 100% funcional.
+- Cancelación segura: **todo** el teardown de servicios se movió de `before-quit` a
+  `will-quit`, que solo corre en una salida real. `before-quit` deja solo el latch
+  reversible `isQuitting=true`; `window:quit-aborted` lo limpia vía `onQuitAborted`.
+  Así cancelar un Cmd+Q deja Orca 100% funcional.
+  - **Invariante al mergear upstream:** si upstream agrega teardown nuevo a
+    `before-quit`, hay que MOVERLO a `will-quit`. Hoy son `rateLimits.stop()`,
+    `agentAwakeService`, `unsubscribeAgentAwakeStatusChanges`, y (desde 1.4.176)
+    `desktopRelayService.fenceAndCloseNow()` +
+    `runtimeRpc.setMobileRelayPairingProvider(null)`. Lo único que queda en
+    `before-quit` es el latch y logging inocuo (`isQuittingForUpdate`).
 - Archivos: `src/renderer/src/components/Terminal.tsx` (diálogo + texto condicional +
   `cancelWindowClose`), `src/preload/index.ts` + `api-types.ts` + `web/web-preload-api.ts`
   (`abortWindowClose`), `src/main/window/createMainWindow.ts` (canal `window:quit-aborted`),
   `src/main/index.ts` (teardown movido a `will-quit`).
+- Desde 1.4.176 el fork ADOPTA `confirmNativeWindowClose` de upstream (dispara un
+  `beforeunload` cancelable y aborta si un guard lo veta) y solo conserva su
+  `proceedToNativeWindowClose` propio, que abre el diálogo siempre que
+  `isQuitting || hasRunningProcesses`. No volver a despachar el `beforeunload`
+  no-cancelable que tenía el fork antes: se pierde el veto de los guards.
+
+## Parche de producto: time tracking humano (`src/main/time-tracker/`)
+
+Feature propia del fork: reporta actividad humana (foco/idle por worktree) a un
+servicio local de time tracking, para distinguir en su Timeline las sesiones de Orca
+de las de VS Code (`sourceName: 'orca'`).
+
+- Wiring: `wireTimeTracker(store)` en `src/main/index.ts`, **fuera** de
+  `registerCoreHandlers` a propósito (esa función está once-guarded y con firma muy
+  ancha; pasarle el tracker maximizaría los conflictos de merge).
+- Flujo: el renderer (`hooks/useTimeTrackerActivity.ts`) manda pings por
+  `ipcMain.on('timeTracker:activity')` (fire-and-forget, `.on` no `.handle`) →
+  `buildCtx` resuelve repo/worktree/branch → `client.ts` postea al servicio.
+- Servicio: `http://localhost:47321` por defecto; configurable con
+  `TIME_TRACKER_BASE_URL` / `TIME_TRACKER_SERVICE_PATH` /
+  `TIME_TRACKER_IDLE_MS` / `TIME_TRACKER_BLUR_GRACE_MS` / `TIME_TRACKER_HEARTBEAT_MS`.
+  `service-spawn.ts` hace health-check y, si está caído, lo levanta detached.
+- Si el servicio no está corriendo, TODO es un no-op silencioso: `client.ts` nunca
+  rechaza. Nunca debe bloquear ni romper Orca.
+- **Invariante (crash real, no teórico):** `client.ts` usa `fetch` global (undici) y solo
+  lee `res.ok`. Un response body sin consumir puede **tumbar el proceso entero**
+  (orca#8695), así que cada llamada hace `await cancelUnreadResponseBody(res)` antes de
+  leer `res.ok`. El guard `src/main/global-fetch-call-site-audit.test.ts` lo verifica:
+  al agregar o mover una llamada a `fetch` aquí hay que actualizar su conteo en
+  `AUDITED_GLOBAL_FETCH_LINES` (`main/time-tracker/client.ts` → 2).
 - Copias i18n nuevas usan claves `fork.terminal.quitConfirm.*` con fallback en inglés
   (`translate` cae al fallback si la clave no existe; no rompe el pipeline i18n).
 
 ## Estado upstream
 
 - Issue original: stablyai/orca#4566 (de otro usuario, mismo problema)
-- Nuestro PR: **stablyai/orca#4626** (`Fixes #4566`)
-- Cuando el PR se mergee y salga release: volver al Orca oficial y abandonar este build.
+- Nuestro PR: **stablyai/orca#4626** (`Fixes #4566`) — sigue **OPEN** al 2026-08-07.
+- **Novedad (2026-07-20):** el maintainer `brennanb2025` tomó la rama, la rebaseó sobre
+  `main` y endureció la implementación: comparte el estado git-crypt del repo (con copia
+  no-clobber cuando no hay symlinks), resuelve layouts linked/separate/bare, **cubre la
+  ruta del relay SSH** (que era limitación conocida nuestra) y hace rollback tanto del
+  setup como del checkout. O sea: está en manos de ellos, no nuestras — no tocar la rama.
+  - CodeRabbit dejó 2 warnings abiertos: que el PR no implementa el "pre-create hook"
+    que pedía el issue #4566, y que el alcance creció al relay SSH. Si piden acción,
+    es ahí.
+- **Verificado el 2026-08-07:** upstream/main NO tiene git-crypt en `src/` (cero
+  coincidencias). El fork DEBE seguir cargando el parche. No asumir que ya se mergeó
+  solo porque el PR lleva meses abierto — verificar con
+  `git grep -l "git-crypt" upstream/main -- src/`.
+- Nota: la idea de "volver al Orca oficial y abandonar este build" quedó derogada — el
+  fork es base de producto permanente (ver "Estrategia de fork de producto").
 
 ## Ramas
 
@@ -224,14 +300,27 @@ open -a Orca
   recibe el feed oficial y muestra "Update Available" — se conserva a proposito
   como NOTIFICACION de releases upstream — pero NO descarga ni instala. Flag
   unica: `src/shared/fork-build.ts` → `FORK_SELF_UPDATE_DISABLED`. Capas:
-  - `src/main/updater.ts`: `autoInstallOnAppQuit = !FORK_SELF_UPDATE_DISABLED`
-    (false) — nada se aplica al salir.
+  - `src/main/updater.ts`: el flag entra como primer término del
+    `autoInstallOnAppQuit` de upstream (`!FORK_SELF_UPDATE_DISABLED && …`) — nada se
+    aplica al salir. Al mergear, upstream reescribe esa línea seguido; reaplicar el
+    término, no restaurar la asignación vieja del fork.
   - `src/main/window/attach-main-window-services.ts`: IPC `updater:download` y
     `updater:quitAndInstall` no-opean en modo fork (limite de entrada; la logica
     core de updater.ts queda intacta para sus tests).
-  - UI: `UpdateCard.tsx` (`ForkUpdateNotice` + `handleUpdate` no-op) y
+  - UI: `UpdateCard.tsx` (`ForkUpdateAvailableCard` + `handleUpdate` no-op) y
     `GeneralUpdateSettingsSection.tsx` (oculta "Install Update"/"Restart to
     Update", texto fork-aware).
+  - **`ForkUpdateAvailableCard` es un componente APARTE, a propósito.** Antes el fork
+    reescribía `SimpleCardContent` in situ, pero esa es la tarjeta de instalación de
+    upstream (botón "Update", copy "is ready") — chocaba en cada merge y rompía su
+    contrato de props. Hoy `SimpleCardContent` queda idéntico a upstream y el fork
+    hace early-return a su propia tarjeta (solo notifica, sin botón de install).
+    No volver a mezclarlas.
+  - Los builds locales (`status.source === 'local'`) no llevan link de release notes:
+    su versión no existe en GitHub. La tarjeta del fork respeta `isLocalBuild`.
+  - Tests de upstream que asumen descarga (`updater.test.ts`,
+    `updater.headless-serve-install.test.ts`, `UpdateCard.error-card.test.tsx`) están
+    hechos fork-aware con `FORK_SELF_UPDATE_DISABLED`, no desactivados.
   Historico: la neutralizacion previa era SOLO el texto `ForkUpdateNotice`; el
   boton de Settings seguia descargando (de ahi el "1.4.64 is ready"). Si quedo
   algo staged, limpiar `~/Library/Caches/com.stablyai.orca.ShipIt`.
@@ -255,10 +344,43 @@ git fetch upstream
 git merge --ff-only upstream/main      # espejo limpio
 git checkout personal/build
 git merge main                          # integra upstream al build personal
-pnpm install                            # deps pueden haber cambiado
-pnpm run build:mac
-# swap del .app (ver arriba)
+pnpm install --frozen-lockfile          # deps NUEVAS: hacerlo ANTES de correr tests
+pnpm run typecheck                      # caza los Record<TuiAgent> y switches nuevos
+npx vitest run --config config/vitest.config.ts src/main/git/   # el fix de git-crypt
+CSC_IDENTITY_AUTO_DISCOVERY=false pnpm run build:mac
+./scripts/fork-swap-app.sh              # en una terminal FUERA de Orca
+./scripts/fork-sync-provider-hooks.sh   # re-sincroniza hooks de kimi/minimax/zai
 ```
+
+### Qué esperar en un merge grande (referencia: 1.4.122 → 1.4.176, 2170 commits)
+
+- ~18 conflictos, TODOS en archivos con parches del fork. La mayoría son uniones
+  triviales de imports; los caros son `Terminal.tsx`, `UpdateCard.tsx`,
+  `ActivityPrototypePage.tsx` e `index.ts`.
+- **Regla general:** cuando upstream reestructura un componente/función que el fork
+  parchea, **tomar la versión de upstream completa y reaplicar el parche encima**, en
+  vez de conservar la estructura vieja del fork. Sale más barato y evita perderse fixes
+  de upstream (ej. en 1.4.176 upstream eliminó un override de `verifyUpdateCodeSignature`
+  que desactivaba la verificación Authenticode — un fix de seguridad).
+- **El typecheck es el mejor detector de integración**, no solo de tipos: caza los
+  `Record<TuiAgent>` nuevos (`skills-cli-agent-keys.ts`) y los `switch` sin `default`
+  sobre uniones que el fork extiende (`preview-terminal-key-handler.ts`).
+- **Tests que fallan tras el merge, clasificados:**
+  - *Mocks desactualizados* del fork (ej. upstream envolvió `addWorktree` en
+    `runWithGitReadCacheInvalidation`, o agregó `timeout` a un exec) → actualizar el
+    mock/aserción; es mantenimiento.
+  - *Tests de upstream que asumen conducta que el fork cambia a propósito* (descargar
+    updates) → hacerlos fork-aware con `FORK_SELF_UPDATE_DISABLED`, NO borrarlos.
+  - *Guards de upstream que cazan un bug real del fork* → arreglar el código del fork
+    (así salió el crash de undici en `time-tracker/client.ts`).
+  - *Ambientales en macOS*: `config/scripts/check-root-directory-entries.test.mjs`
+    falla siempre en local — su script usa `declare -A`, que necesita bash 4+ y macOS
+    trae 3.2. No es del fork; el CI de upstream corre Linux. Ignorable.
+  - `src/main/runtime/orchestration-cli-subprocess.test.ts` usa `out/cli/index.js`; si
+    está viejo falla. Correr `pnpm run build:cli` antes.
+- El commit del merge puede necesitar `--no-verify`: lint-staged intenta lintear los
+  ~9000 archivos del merge y oxlint muere. Correr typecheck completo + `npx oxlint`
+  sobre los archivos editados a mano ANTES de saltarse el hook.
 
 - Conflicto probable: `src/main/git/worktree.ts` si upstream toca esa zona.
   - Si el conflicto es porque **mergearon nuestro PR**: resolver quedandose con la
