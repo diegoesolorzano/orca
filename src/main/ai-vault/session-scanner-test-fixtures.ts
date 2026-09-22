@@ -1,5 +1,55 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import Database from '../sqlite/sync-database'
+
+export async function writeOpenCode2SqliteFixture(root: string): Promise<string> {
+  // Why: opencode2 (beta) sessions come from the channel-scoped SQLite DB
+  // (session_v2/session_message schema) alongside the v1 store.
+  const opencode2DbPath = join(root, 'opencode-next.db')
+  const db = new Database(opencode2DbPath)
+  db.exec(`
+    CREATE TABLE session_v2 (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      parent_id TEXT,
+      slug TEXT NOT NULL,
+      directory TEXT NOT NULL,
+      title TEXT,
+      version TEXT NOT NULL,
+      time_created INTEGER NOT NULL,
+      time_updated INTEGER NOT NULL,
+      time_archived INTEGER
+    );
+    CREATE TABLE session_message (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      time_created INTEGER NOT NULL,
+      time_updated INTEGER NOT NULL,
+      data TEXT NOT NULL
+    );
+  `)
+  db.prepare(
+    `INSERT INTO session_v2
+      (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated)
+     VALUES (?, 'proj-1', NULL, 'slug', '/tmp/opencode2', 'OpenCode 2 title', '0.0.0-next-1', 1777634000000, 1777634001000)`
+  ).run('opencode2-session')
+  db.prepare(
+    `INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
+     VALUES (?, 'opencode2-session', 'user', 1, 1777634000500, 1777634000500, ?)`
+  ).run(
+    'msg_opencode2_1',
+    JSON.stringify({
+      id: 'msg_opencode2_1',
+      type: 'user',
+      text: 'OpenCode 2 title',
+      time: { created: 1777634000500 }
+    })
+  )
+  db.close()
+  return opencode2DbPath
+}
 
 export function isolatedScanRoots(root: string) {
   return {
@@ -21,8 +71,10 @@ export function isolatedScanRoots(root: string) {
     openclawLegacyStateDir: join(root, 'openclaw-legacy-state'),
     piSessionsDir: join(root, 'pi-sessions'),
     ompSessionsDir: join(root, 'omp-sessions'),
+    primeAgentSessionsDir: join(root, 'prime-agent-sessions'),
     droidSessionsDir: join(root, 'droid-sessions'),
     droidProjectsDir: join(root, 'droid-projects'),
+    clineSessionsDir: join(root, 'cline-sessions'),
     kimiSessionsDir: join(root, 'kimi-sessions')
   }
 }
@@ -31,9 +83,12 @@ export function jsonLines(records: unknown[]): string {
   return records.map((record) => JSON.stringify(record)).join('\n')
 }
 
+// Newline-terminated, the way an agent writes each record: a file whose last
+// line has no break is a transcript mid-write, and the reader deliberately
+// withholds that line from consumers until it is complete.
 export async function writeJsonlFile(filePath: string, records: unknown[]): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true })
-  await writeFile(filePath, jsonLines(records))
+  await writeFile(filePath, `${jsonLines(records)}\n`)
 }
 
 export async function writeAntigravityTranscript(
@@ -48,6 +103,72 @@ export async function writeAntigravityTranscript(
 
 export function writeAntigravityHistory(brainDir: string, records: unknown[]): Promise<void> {
   return writeJsonlFile(join(dirname(brainDir), 'history.jsonl'), records)
+}
+
+// Message-graph fixtures for the Pi forks: each writes one session transcript
+// and returns its path, since both agents resume by absolute transcript path.
+export async function writeOmpScannerFixture(sessionsDir: string): Promise<string> {
+  const sessionFile = join(sessionsDir, 'omp-session.jsonl')
+  await writeJsonlFile(sessionFile, [
+    {
+      type: 'session',
+      version: 3,
+      id: 'omp-session',
+      title: 'OMP session title',
+      timestamp: '2026-05-01T10:08:30.000Z',
+      cwd: '/tmp/omp'
+    },
+    {
+      type: 'model_change',
+      model: 'gpt-5.4-mini',
+      timestamp: '2026-05-01T10:08:30.500Z'
+    },
+    {
+      type: 'message',
+      timestamp: '2026-05-01T10:08:31.000Z',
+      message: { role: 'user', content: [{ type: 'text', text: 'OMP title' }] }
+    },
+    {
+      type: 'message',
+      timestamp: '2026-05-01T10:08:32.000Z',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'OMP answer' }],
+        model: 'gpt-5.4-mini',
+        // totalTokens deliberately != input+output so the assertion proves
+        // the explicit-total field is read, not an input/output sum.
+        usage: { input: 10, output: 5, totalTokens: 160 }
+      }
+    }
+  ])
+  return sessionFile
+}
+
+// Prime Agent shares Pi's message-graph format (and its `modelId` key) but
+// reads its own ~/.prime/agent/sessions root.
+export async function writePrimeAgentScannerFixture(sessionsDir: string): Promise<string> {
+  const sessionFile = join(sessionsDir, 'prime-agent-session.jsonl')
+  await writeJsonlFile(sessionFile, [
+    {
+      type: 'session',
+      version: 3,
+      id: 'prime-agent-session',
+      timestamp: '2026-05-01T10:08:40.000Z',
+      cwd: '/tmp/prime-agent'
+    },
+    {
+      type: 'model_change',
+      provider: 'prime-intellect',
+      modelId: 'inference/big-model',
+      timestamp: '2026-05-01T10:08:40.500Z'
+    },
+    {
+      type: 'message',
+      timestamp: '2026-05-01T10:08:41.000Z',
+      message: { role: 'user', content: [{ type: 'text', text: 'Prime Agent title' }] }
+    }
+  ])
+  return sessionFile
 }
 
 export function writeAntigravityScannerFixture(

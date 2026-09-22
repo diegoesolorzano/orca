@@ -12,6 +12,7 @@ import type { PtyProcessInspection } from '../providers/pty-process-inspection'
 import { shouldHandoffDaemonHistory } from './daemon-history-handoff'
 import type { DaemonPtyRouterDataEvent, DaemonPtyRouterExitEvent } from './daemon-pty-router-events'
 import { DaemonSessionOwnerResolver } from './daemon-session-owner-resolution'
+import type { WriteSettlement } from '../../shared/pty-write-settlement'
 
 export class DaemonPtyRouter implements IPtyProvider {
   private current: DaemonPtyAdapter
@@ -73,8 +74,8 @@ export class DaemonPtyRouter implements IPtyProvider {
     return this.current.supportsAgentSessionCreateOperations()
   }
 
-  async attach(id: string): Promise<void> {
-    await this.adapterFor(id).attach(id)
+  async attach(id: string): ReturnType<IPtyProvider['attach']> {
+    return await this.adapterFor(id).attach(id)
   }
 
   hasPty(id: string): boolean {
@@ -89,8 +90,12 @@ export class DaemonPtyRouter implements IPtyProvider {
     return await this.ownerResolver.probe(id)
   }
 
-  write(id: string, data: string): void {
-    this.adapterFor(id).write(id, data)
+  write(id: string, data: string): boolean {
+    return this.adapterFor(id).write(id, data)
+  }
+
+  writeWithSettlement(id: string, data: string): Promise<WriteSettlement> {
+    return this.adapterFor(id).writeWithSettlement(id, data)
   }
 
   resize(id: string, cols: number, rows: number): void {
@@ -173,12 +178,19 @@ export class DaemonPtyRouter implements IPtyProvider {
     return this.adapterFor(id).getForegroundProcess(id)
   }
 
-  async inspectProcess(id: string): Promise<PtyProcessInspection> {
-    return this.adapterForInspection(id).inspectProcess(id)
+  async inspectProcess(
+    id: string,
+    options?: { expectedIncarnationId?: string; steadyState?: boolean }
+  ): Promise<PtyProcessInspection> {
+    return this.adapterForInspection(id).inspectProcess(id, options)
   }
 
   async confirmForegroundProcess(id: string): Promise<string | null> {
     return this.adapterFor(id).confirmForegroundProcess(id)
+  }
+
+  async confirmShellForeground(id: string): Promise<boolean> {
+    return (await this.adapterFor(id).confirmShellForeground?.(id)) ?? false
   }
 
   async serialize(ids: string[]): Promise<string> {

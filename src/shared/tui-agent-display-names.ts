@@ -1,4 +1,4 @@
-import type { TuiAgent } from './types'
+import type { TuiAgent } from './tui-agent'
 
 /** Why: plain-English agent names for non-localized surfaces (keybinding
  * titles in the shared registry, which main, renderer, and the keybindings
@@ -15,9 +15,11 @@ export const TUI_AGENT_DISPLAY_NAMES: Record<TuiAgent, string> = {
   trae: 'Trae',
   autohand: 'Autohand Code',
   opencode: 'OpenCode',
+  opencode2: 'OpenCode 2',
   'mimo-code': 'MiMo Code',
   pi: 'Pi',
   omp: 'OMP',
+  'prime-agent': 'Prime Agent',
   gemini: 'Gemini',
   antigravity: 'Antigravity',
   aider: 'Aider',
@@ -29,6 +31,7 @@ export const TUI_AGENT_DISPLAY_NAMES: Record<TuiAgent, string> = {
   aug: 'Auggie',
   cline: 'Cline',
   codebuff: 'Codebuff',
+  freebuff: 'Freebuff',
   'command-code': 'Command Code',
   continue: 'Continue',
   cursor: 'Cursor',

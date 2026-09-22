@@ -5,6 +5,7 @@ import type {
   CatalogOption
 } from './agent-session-option-catalog'
 import type {
+  NativeChatLiveOptionTransport,
   SessionOptionDescriptor,
   SessionOptionSelectChoice
 } from './native-chat-session-options'
@@ -15,6 +16,7 @@ import {
 } from './native-chat-session-option-state'
 
 export type NativeChatSessionOptionMode = 'draft' | 'live'
+export type { NativeChatLiveOptionTransport }
 
 function choiceWithCurrent(
   choices: readonly SessionOptionSelectChoice[],
@@ -30,6 +32,7 @@ function choiceWithCurrent(
 
 function settableState(args: {
   mode: NativeChatSessionOptionMode
+  liveTransport: NativeChatLiveOptionTransport
   apply: { launchArgs?: unknown; composedIntoModel?: true; midSession?: CatalogMidSessionApply }
   composedModelApply?: { midSession?: CatalogMidSessionApply }
 }): Pick<SessionOptionDescriptor, 'settable' | 'disabledReason'> {
@@ -37,6 +40,9 @@ function settableState(args: {
     return args.apply.launchArgs || args.apply.composedIntoModel
       ? { settable: true }
       : { settable: false, disabledReason: 'available-after-session-start' }
+  }
+  if (args.liveTransport === 'agent-session') {
+    return { settable: true }
   }
   if (args.apply.composedIntoModel && args.composedModelApply?.midSession?.kind === 'command') {
     return { settable: true }
@@ -50,9 +56,10 @@ function settableState(args: {
 function actionForApply(
   apply: { midSession?: CatalogMidSessionApply },
   tracked: TrackedNativeChatSessionOption | undefined,
-  mode: NativeChatSessionOptionMode
+  mode: NativeChatSessionOptionMode,
+  liveTransport: NativeChatLiveOptionTransport
 ): SessionOptionDescriptor['action'] {
-  if (mode !== 'live') {
+  if (mode !== 'live' || liveTransport === 'agent-session') {
     return undefined
   }
   if (apply.midSession?.kind === 'agent-picker') {
@@ -67,16 +74,29 @@ function optionDescriptor(args: {
   option: CatalogOption
   tracked: TrackedNativeChatSessionOption | undefined
   mode: NativeChatSessionOptionMode
+  liveTransport: NativeChatLiveOptionTransport
+  modelIsCliDefault: boolean
   composedModelApply: AgentSessionOptionCatalog['modelApply']
 }): SessionOptionDescriptor | null {
-  const { option, tracked, mode, composedModelApply } = args
-  const action = actionForApply(option.apply, tracked, mode)
-  const settable = settableState({ mode, apply: option.apply, composedModelApply })
+  const { option, tracked, mode, liveTransport, modelIsCliDefault, composedModelApply } = args
+  const action = actionForApply(option.apply, tracked, mode, liveTransport)
+  const settable = settableState({ mode, liveTransport, apply: option.apply, composedModelApply })
+  // Why: the launch only emits `values[id] ?? defaultValue` alongside a model flag, so
+  // a draft names this option's value exactly when a model was picked. Under the CLI's
+  // own default no flag is sent at all, and the CLI's unstated choice is not ours to name.
+  const showDefault = mode === 'draft' && !tracked && !modelIsCliDefault
+  const valueSource = tracked?.source ?? (showDefault ? 'default' : 'unknown')
   if (option.kind.type === 'select') {
     const choices = choiceWithCurrent(option.kind.choices, tracked)
     if (choices.length <= 1) {
       return null
     }
+    const currentValue =
+      typeof tracked?.value === 'string'
+        ? tracked.value
+        : showDefault
+          ? option.kind.defaultValue
+          : undefined
     return {
       id: option.id,
       label: option.label,
@@ -84,14 +104,24 @@ function optionDescriptor(args: {
       ...(option.category ? { category: option.category } : {}),
       kind: {
         type: 'select',
-        ...(typeof tracked?.value === 'string' ? { currentValue: tracked.value } : {}),
+        ...(currentValue === undefined ? {} : { currentValue }),
         choices
       },
-      valueSource: tracked?.source ?? 'unknown',
+      valueSource,
+      transport: liveTransport,
       ...settable,
       ...(action ? { action } : {})
     }
   }
+  // Why display resolves here but `valueSource` above does not: a switch has no
+  // third position, so a descriptor that leaves the value unset renders as `false`
+  // and silently contradicts the catalog. Resolving to `defaultValue` is the same
+  // `values[id] ?? defaultValue` the composed dispatch already assumes
+  // (buildNativeChatSessionOptionCommand), so the row shows what a flip acts on.
+  // Provenance stays on its own track: an unpicked row keeps `unknown`/`default`,
+  // which is what every pill still reads before naming a value.
+  const currentValue =
+    typeof tracked?.value === 'boolean' ? tracked.value : option.kind.defaultValue
   return {
     id: option.id,
     label: option.label,
@@ -99,9 +129,10 @@ function optionDescriptor(args: {
     ...(option.category ? { category: option.category } : {}),
     kind: {
       type: 'boolean',
-      ...(typeof tracked?.value === 'boolean' ? { currentValue: tracked.value } : {})
+      currentValue
     },
-    valueSource: tracked?.source ?? 'unknown',
+    valueSource,
+    transport: liveTransport,
     ...settable,
     ...(action ? { action } : {})
   }
@@ -147,14 +178,41 @@ export function withTrackedNativeChatModel(
   return [...models, seeded ?? { id: trackedId, label: trackedId, options: [] }]
 }
 
+/** Why: no tracked model means no `-m` was ever emitted, so the CLI is running its
+ *  own default — nameable only for a catalog that proves the seed states it. */
+function cliDefaultModelId(
+  catalog: AgentSessionOptionCatalog,
+  models: readonly CatalogModel[],
+  trackedModelId: string | null
+): string | null {
+  if (trackedModelId || !catalog.defaultModelIsCliDefault) {
+    return null
+  }
+  return models.find((model) => model.isDefault)?.id ?? null
+}
+
+/** The model the picker is showing, tracked or CLI default. Shared so applying an
+ *  option resolves the same row the snapshot rendered it under. */
+export function resolveEffectiveNativeChatModelId(
+  catalog: AgentSessionOptionCatalog,
+  models: readonly CatalogModel[],
+  record: NativeChatSessionOptionRecord
+): string | null {
+  const trackedModelId = typeof record.model?.value === 'string' ? record.model.value : null
+  return trackedModelId ?? cliDefaultModelId(catalog, models, trackedModelId)
+}
+
 export function buildNativeChatSessionOptionSnapshot(args: {
   catalog: AgentSessionOptionCatalog
   models: readonly CatalogModel[]
   record: NativeChatSessionOptionRecord
   mode: NativeChatSessionOptionMode
   modelLabel: string
+  /** Required, not defaulted: this is the only place a descriptor is built, so a
+   *  producer that must state its lane here cannot silently inherit the other's. */
+  liveTransport: NativeChatLiveOptionTransport
 }): SessionOptionDescriptor[] {
-  const { catalog, models, record, mode, modelLabel } = args
+  const { catalog, models, record, mode, modelLabel, liveTransport } = args
   if (models.length === 0) {
     return []
   }
@@ -167,7 +225,10 @@ export function buildNativeChatSessionOptionSnapshot(args: {
     label,
     ...(description ? { description } : {})
   }))
-  const modelAction = actionForApply(catalog.modelApply, modelTracked, mode)
+  const trackedModelId = typeof modelTracked?.value === 'string' ? modelTracked.value : null
+  const defaultModelId = cliDefaultModelId(catalog, models, trackedModelId)
+  const effectiveModelId = trackedModelId ?? defaultModelId
+  const modelAction = actionForApply(catalog.modelApply, modelTracked, mode, liveTransport)
   const snapshot: SessionOptionDescriptor[] = [
     {
       id: 'model',
@@ -175,24 +236,27 @@ export function buildNativeChatSessionOptionSnapshot(args: {
       category: 'model',
       kind: {
         type: 'select',
-        ...(typeof modelTracked?.value === 'string' ? { currentValue: modelTracked.value } : {}),
+        ...(effectiveModelId ? { currentValue: effectiveModelId } : {}),
         choices: modelChoices
       },
-      valueSource: modelTracked?.source ?? 'unknown',
-      ...settableState({ mode, apply: catalog.modelApply }),
+      valueSource: modelTracked?.source ?? (defaultModelId ? 'default' : 'unknown'),
+      transport: liveTransport,
+      ...settableState({ mode, liveTransport, apply: catalog.modelApply }),
       ...(modelAction ? { action: modelAction } : {})
     }
   ]
-  if (typeof modelTracked?.value !== 'string') {
+  if (!effectiveModelId) {
     return snapshot
   }
-  const model = models.find((candidate) => candidate.id === modelTracked.value)
-  const trackedValues = record.valuesByModel[modelTracked.value] ?? {}
+  const model = models.find((candidate) => candidate.id === effectiveModelId)
+  const trackedValues = record.valuesByModel[effectiveModelId] ?? {}
   for (const option of model?.options ?? []) {
     const descriptor = optionDescriptor({
       option,
       tracked: trackedValues[option.id],
       mode,
+      liveTransport,
+      modelIsCliDefault: effectiveModelId === defaultModelId,
       composedModelApply: catalog.modelApply
     })
     if (descriptor) {

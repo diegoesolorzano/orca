@@ -27,7 +27,11 @@ type StoreState = Record<string, unknown>
 
 let mockStoreState: StoreState
 let storeSubscribers: ((state: StoreState) => void)[] = []
-const remountTerminalTabForRecovery = vi.fn<(tabId: string) => boolean>(() => true)
+/** The store action reports admission now, not a bare boolean. */
+const REMOUNTED = { remounted: true as const, generation: 1 }
+const remountTerminalTabForRecovery = vi.fn<(tabId: string, request?: unknown) => typeof REMOUNTED>(
+  () => REMOUNTED
+)
 
 vi.mock('@/store', () => ({
   useAppStore: {
@@ -42,9 +46,6 @@ vi.mock('@/store', () => ({
 }))
 
 vi.mock('@/runtime/sync-runtime-graph', () => ({ scheduleRuntimeGraphSync: vi.fn() }))
-vi.mock('@/components/terminal-pane/terminal-webgl-atlas-recovery', () => ({
-  scheduleTerminalWebglAtlasRecovery: vi.fn()
-}))
 vi.mock('sonner', () => ({ toast: { info: vi.fn() } }))
 vi.mock('@/lib/codex-stale-pane-sweep', () => ({ notifyCodexPaneBoundForStaleSweep: vi.fn() }))
 vi.mock('@/runtime/web-runtime-session', () => ({
@@ -281,7 +282,7 @@ describe('host-rejected paired-runtime input reaches a pane remount', () => {
     vi.resetModules()
     vi.clearAllMocks()
     storeSubscribers = []
-    remountTerminalTabForRecovery.mockReturnValue(true)
+    remountTerminalTabForRecovery.mockReturnValue(REMOUNTED)
     mockStoreState = {
       activeWorktreeId: 'wt-1',
       activeWorkspaceExecutionHostId: `runtime:${ENVIRONMENT_ID}`,
@@ -322,7 +323,6 @@ describe('host-rejected paired-runtime input reaches a pane remount', () => {
       suppressedPtyExitIds: {},
       agentLaunchConfigByPaneKey: {},
       getAgentLaunchConfigForStatusEntry: vi.fn(),
-      getAgentLaunchConfigForStatusMetadata: vi.fn(),
       clearSleepingAgentSession: vi.fn(),
       registerAgentLaunchConfig: vi.fn(),
       clearAgentLaunchConfig: vi.fn(),
@@ -420,7 +420,12 @@ describe('host-rejected paired-runtime input reaches a pane remount', () => {
       // Hop 1: the host turned the refusal into the negotiated frame.
       await vi.waitFor(() => expect(hostOpcodes).toContain(TerminalStreamOpcode.WriteUnavailable))
       // Hop 2 (the one that was missing): it survives pane recovery as a remount.
-      await vi.waitFor(() => expect(remountTerminalTabForRecovery).toHaveBeenCalledWith('tab-1'))
+      await vi.waitFor(() =>
+        expect(remountTerminalTabForRecovery).toHaveBeenCalledWith(
+          'tab-1',
+          expect.objectContaining({ reason: 'input-rejected-by-host', trigger: 'automatic' })
+        )
+      )
 
       binding.dispose()
       _resetTerminalPaneRecoveryForTests()

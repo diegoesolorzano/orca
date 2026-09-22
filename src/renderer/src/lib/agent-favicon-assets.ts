@@ -1,8 +1,9 @@
-import type { TuiAgent } from '../../../shared/types'
+import type { TuiAgent } from '../../../shared/tui-agent'
 import grokUrl from '../../../shared/agent-icons/grok.png?url'
 import mimoCodeUrl from '../../../shared/agent-icons/mimo-code.png?url'
 import anteUrl from '../../../shared/agent-icons/ante.png?url'
 import traeUrl from '../../../shared/agent-icons/trae.png?url'
+import primeAgentUrl from '../../../shared/agent-icons/prime-agent.png?url'
 import geminiUrl from '../../../shared/agent-icons/gemini.png?url'
 import antigravityUrl from '../../../shared/agent-icons/antigravity.png?url'
 import gooseUrl from '../../../shared/agent-icons/goose.png?url'
@@ -13,6 +14,7 @@ import augUrl from '../../../shared/agent-icons/aug.png?url'
 import autohandUrl from '../../../shared/agent-icons/autohand.png?url'
 import clineUrl from '../../../shared/agent-icons/cline.png?url'
 import codebuffUrl from '../../../shared/agent-icons/codebuff.png?url'
+import freebuffUrl from '../../../shared/agent-icons/freebuff.png?url'
 import commandCodeUrl from '../../../shared/agent-icons/command-code.png?url'
 import continueUrl from '../../../shared/agent-icons/continue.png?url'
 import cursorUrl from '../../../shared/agent-icons/cursor.png?url'
@@ -36,6 +38,7 @@ export const AGENT_FAVICON_ASSETS: Partial<Record<TuiAgent, string>> = {
   'mimo-code': mimoCodeUrl,
   ante: anteUrl,
   trae: traeUrl,
+  'prime-agent': primeAgentUrl,
   gemini: geminiUrl,
   antigravity: antigravityUrl,
   goose: gooseUrl,
@@ -46,6 +49,7 @@ export const AGENT_FAVICON_ASSETS: Partial<Record<TuiAgent, string>> = {
   autohand: autohandUrl,
   cline: clineUrl,
   codebuff: codebuffUrl,
+  freebuff: freebuffUrl,
   'command-code': commandCodeUrl,
   continue: continueUrl,
   cursor: cursorUrl,

@@ -23,7 +23,10 @@ vi.mock('react-native', () => ({
 }))
 
 vi.mock('expo-router', () => ({
-  router: { replace: vi.fn() }
+  router: { replace: vi.fn() },
+  // `ProtocolBlockScreen` reaches the router through the navigation handoff now, and the handoff's
+  // native form is this hook. Its web form is what posts the target to the shell.
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn(), back: vi.fn(), dismissTo: vi.fn() })
 }))
 
 // Why: mock only client acquisition; the gate must exercise the real
@@ -78,7 +81,6 @@ describe('HostProtocolGate', () => {
   let renderer: ReactTestRenderer | null = null
 
   beforeEach(() => {
-    globalThis.IS_REACT_ACT_ENVIRONMENT = true
     nativeTestState.openUrl.mockClear()
     nativeTestState.platform.OS = 'ios'
     probeMounts.count = 0

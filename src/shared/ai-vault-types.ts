@@ -1,4 +1,4 @@
-import type { TuiAgent } from './types'
+import type { TuiAgent } from './tui-agent'
 import type { ExecutionHostId, ExecutionHostScope } from './execution-host'
 
 export const AI_VAULT_AGENTS = [
@@ -7,16 +7,19 @@ export const AI_VAULT_AGENTS = [
   'hermes',
   'pi',
   'omp',
+  'prime-agent',
   'cursor',
   'gemini',
   'antigravity',
   'rovo',
   'copilot',
   'opencode',
+  'opencode2',
   'grok',
   'openclaw',
   'devin',
   'droid',
+  'cline',
   'kimi'
 ] as const satisfies readonly TuiAgent[]
 
@@ -39,6 +42,9 @@ export function isAiVaultScanCancelledError(error: unknown): boolean {
 export type AiVaultAgent = (typeof AI_VAULT_AGENTS)[number]
 export type AiVaultScope = 'workspace' | 'project' | 'all'
 export type AiVaultSort = 'updated' | 'created'
+export const AI_VAULT_SEARCH_SORTS = ['relevance', 'newest'] as const
+/** Order of full-text search results; the list above has its own `AiVaultSort`. */
+export type AiVaultSearchSort = (typeof AI_VAULT_SEARCH_SORTS)[number]
 export type AiVaultGroup = 'project' | 'folder' | 'agent'
 
 export const AI_VAULT_AGENT_LABELS = {
@@ -47,16 +53,19 @@ export const AI_VAULT_AGENT_LABELS = {
   hermes: 'Hermes',
   pi: 'Pi',
   omp: 'OMP',
+  'prime-agent': 'Prime Agent',
   cursor: 'Cursor',
   gemini: 'Gemini',
   antigravity: 'Antigravity',
   rovo: 'Rovo Dev',
   copilot: 'GitHub Copilot',
   opencode: 'OpenCode',
+  opencode2: 'OpenCode 2',
   grok: 'Grok',
   openclaw: 'OpenClaw',
   devin: 'Devin',
   droid: 'Droid',
+  cline: 'Cline',
   kimi: 'Kimi'
 } as const satisfies Record<AiVaultAgent, string>
 
@@ -116,6 +125,11 @@ export type AiVaultSession = {
   subagentTranscriptCount: number
   resumeCommand: string
   subagent: AiVaultSessionSubagentInfo | null
+  /** Present only when the negotiated client can open the native structured owner. */
+  structuredSession?: {
+    sessionId: string
+    workspaceId: string
+  }
 }
 
 export type AiVaultSubagentListArgs = {

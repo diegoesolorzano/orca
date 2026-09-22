@@ -43,6 +43,37 @@ describe('PluginOverlayManager', () => {
     expect(readFileSync(expected, 'utf8')).toBe('export const X = 1')
   })
 
+  it('keeps the OpenCode 2 plugin in a separate overlay and filename', () => {
+    manager.setSources({ opencode2PluginSource: 'export const V2 = 1' })
+    expect(manager.hasOpenCodeSource('opencode2')).toBe(true)
+    const dir = manager.materializeOpenCode('tab-2:0', undefined, 'opencode2')
+    expect(dir).not.toBeNull()
+    expect(readFileSync(join(dir!, 'plugins', 'orca-opencode2-status.js'), 'utf8')).toBe(
+      'export const V2 = 1'
+    )
+    expect(existsSync(join(dir!, 'plugins', 'orca-opencode-status.js'))).toBe(false)
+  })
+
+  it('installs OpenCode plugins in the canonical XDG config roots', () => {
+    manager.setSources({
+      opencodePluginSource: 'v1 plugin',
+      opencode2PluginSource: 'v2 plugin'
+    })
+
+    expect(
+      manager.installOpenCodePlugin('opencode', { XDG_CONFIG_HOME: join(homeDir, 'xdg') })
+    ).toBe(true)
+    expect(
+      manager.installOpenCodePlugin('opencode2', { XDG_CONFIG_HOME: join(homeDir, 'xdg') })
+    ).toBe(true)
+    expect(
+      readFileSync(join(homeDir, 'xdg', 'opencode', 'plugins', 'orca-opencode-status.js'), 'utf8')
+    ).toBe('v1 plugin')
+    expect(
+      readFileSync(join(homeDir, 'xdg', 'opencode', 'plugins', 'orca-opencode2-status.js'), 'utf8')
+    ).toBe('v2 plugin')
+  })
+
   it('mirrors a preexisting remote OpenCode config dir before adding Orca plugin', () => {
     const userConfigDir = join(homeDir, 'company-opencode')
     mkdirSync(join(userConfigDir, 'plugins'), { recursive: true })
@@ -108,6 +139,17 @@ describe('PluginOverlayManager', () => {
     expect(
       readFileSync(join(ompResult!.sourceAgentDir!, 'extensions', 'orca-agent-status.ts'), 'utf8')
     ).toContain('// omp extension')
+  })
+
+  it('uses only the Prime-specific source in the default Prime agent dir', () => {
+    manager.setSources({ piExtensionSource: '// pi extension' })
+    expect(manager.materializePi('tab-prime-missing:0', undefined, 'prime-agent')).toBeNull()
+
+    manager.setSources({ primeAgentExtensionSource: '// prime extension' })
+    const result = manager.materializePi('tab-prime:0', undefined, 'prime-agent')
+    expect(result?.sourceAgentDir).toBe(join(homeDir, '.prime', 'agent'))
+    expect(readFileSync(result!.statusExtensionPath!, 'utf8')).toContain('// prime extension')
+    expect(readFileSync(result!.statusExtensionPath!, 'utf8')).not.toContain('// pi extension')
   })
 
   it('installs Orca status extension into the remote default Pi agent dir', () => {
@@ -259,6 +301,7 @@ describe('PluginOverlayManager', () => {
       // own extension dir. Pi state must never cross-pollinate in.
       seedAgentDir('.pi', 'pi')
       expect(existsSync(join(homeDir, '.omp'))).toBe(false)
+      expect(existsSync(join(homeDir, '.prime'))).toBe(false)
 
       manager.setSources({ piExtensionSource: '// pi extension' })
       const result = manager.materializePi('tab-relay-omp-empty:0', undefined, 'omp')
@@ -276,7 +319,8 @@ describe('PluginOverlayManager', () => {
       expect(existsSync(join(homeDir, '.omp'))).toBe(false)
       manager.setSources({
         piExtensionSource: '// pi extension',
-        ompExtensionSource: '// omp extension'
+        ompExtensionSource: '// omp extension',
+        primeAgentExtensionSource: '// prime extension'
       })
 
       expect(
@@ -296,6 +340,12 @@ describe('PluginOverlayManager', () => {
       expect(readFileSync(bareOmp!.statusExtensionPath!, 'utf8')).toContain('// omp extension')
       expect(existsSync(join(homeDir, '.pi'))).toBe(false)
       expect(existsSync(join(homeDir, '.omp'))).toBe(false)
+      expect(
+        manager.materializePi('tab-bare-prime:0', undefined, 'prime-agent', {
+          materializeDefaultHome: false
+        })
+      ).toBeNull()
+      expect(existsSync(join(homeDir, '.prime'))).toBe(false)
     })
   })
 
@@ -308,20 +358,24 @@ describe('PluginOverlayManager', () => {
   it('clearOverlay removes OpenCode overlays without deleting real Pi/OMP homes', () => {
     manager.setSources({
       opencodePluginSource: 'opencode',
+      opencode2PluginSource: 'opencode2',
       piExtensionSource: 'pi',
       ompExtensionSource: 'omp'
     })
     const opencodeDir = manager.materializeOpenCode('tab-3:0')!
+    const opencode2Dir = manager.materializeOpenCode('tab-3:0', undefined, 'opencode2')!
     const piDir = manager.materializePi('tab-3:0', undefined, 'pi')!.sourceAgentDir!
     const ompDir = manager.materializePi('tab-3:0', undefined, 'omp')!.sourceAgentDir!
     expect(piDir).not.toBe(ompDir)
     expect(existsSync(opencodeDir)).toBe(true)
+    expect(existsSync(opencode2Dir)).toBe(true)
     expect(existsSync(piDir)).toBe(true)
     expect(existsSync(ompDir)).toBe(true)
 
     manager.clearOverlay('tab-3:0')
 
     expect(existsSync(opencodeDir)).toBe(false)
+    expect(existsSync(opencode2Dir)).toBe(false)
     expect(existsSync(piDir)).toBe(true)
     expect(existsSync(ompDir)).toBe(true)
   })

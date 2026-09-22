@@ -12,7 +12,9 @@ afterEach(() => {
 describe('getTerminalUrlOpenHint', () => {
   it('keeps the system-browser wording by default', () => {
     stubPlatform(true)
-    expect(getTerminalUrlOpenHint()).toBe('⌘+click to open or ⇧⌘+click for system browser')
+    expect(getTerminalUrlOpenHint()).toBe(
+      'Click for actions, ⌘+click to open, or ⇧⌘+click for system browser'
+    )
   })
 
   it('keeps the system-browser wording when inverting is off', () => {
@@ -34,15 +36,26 @@ describe('getTerminalUrlOpenHint', () => {
   it('names Orca when inverting and links open externally', () => {
     stubPlatform(true)
     expect(getTerminalUrlOpenHint({ openLinksInApp: false, modifierInverts: true })).toBe(
-      '⌘+click to open or ⇧⌘+click to open in Orca'
+      'Click for actions, ⌘+click to open, or ⇧⌘+click to open in Orca'
     )
   })
 
   it('uses the Ctrl chord off macOS', () => {
     stubPlatform(false)
     expect(getTerminalUrlOpenHint({ openLinksInApp: false, modifierInverts: true })).toBe(
-      'Ctrl+click to open or Shift+Ctrl+click to open in Orca'
+      'Click for actions, Ctrl+click to open, or Shift+Ctrl+click to open in Orca'
     )
+  })
+
+  it('omits the action-menu gesture when terminal link actions are disabled', () => {
+    stubPlatform(false)
+    expect(
+      getTerminalUrlOpenHint({
+        openLinksInApp: false,
+        modifierInverts: true,
+        showActions: false
+      })
+    ).toBe('Ctrl+click to open, or Shift+Ctrl+click to open in Orca')
   })
 })
 
@@ -124,5 +137,31 @@ describe('terminalUrlOpenHintOptionsFor', () => {
 
     expect(options.modifierInverts).toBe(true)
     expect(getTerminalUrlOpenHint(options)).toContain('to open in Orca')
+  })
+
+  it('keeps inversion for a runtime pane when its host can open an Orca browser', () => {
+    const options = terminalUrlOpenHintOptionsFor(
+      {
+        openLinksInApp: false,
+        openLinksInAppModifierInverts: true
+      },
+      { kind: 'runtime', runtimeEnvironmentId: 'env-1' },
+      true
+    )
+
+    expect(options.modifierInverts).toBe(true)
+  })
+
+  it('keeps inversion for an eligible SSH pane', () => {
+    const options = terminalUrlOpenHintOptionsFor(
+      {
+        openLinksInApp: false,
+        openLinksInAppModifierInverts: true
+      },
+      { kind: 'ssh', connectionId: 'ssh-1' },
+      true
+    )
+
+    expect(options.modifierInverts).toBe(true)
   })
 })

@@ -69,6 +69,10 @@ describe('getDefaultSettings', () => {
     expect(getDefaultSettings('/tmp').showMenuBarIcon).toBe(true)
   })
 
+  it('shows terminal link actions by default', () => {
+    expect(getDefaultSettings('/tmp').terminalLinkActionPopoverEnabled).toBe(true)
+  })
+
   it('confirms before closing pinned tabs by default', () => {
     expect(getDefaultSettings('/tmp').confirmClosePinnedTab).toBe(true)
   })
@@ -176,5 +180,10 @@ describe('MiniMax defaults', () => {
     // MiniMax usage endpoint exposes by default.
     expect(settings.minimaxGroupId).toBe('')
     expect(settings.minimaxUsageModels).toBe('general')
+  })
+
+  it('defaults the MiniMax endpoint to overseas', () => {
+    const settings = getDefaultSettings('/tmp')
+    expect(settings.minimaxEndpoint).toBe('overseas')
   })
 })

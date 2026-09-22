@@ -14,7 +14,7 @@ describe('useMobileNativeChatSessionOptions', () => {
   let renderer: ReactTestRenderer | null = null
   let api: MobileNativeChatSessionOptionsController | null = null
   let hookArgs: HookArgs
-  const dispatchCommand = vi.fn<(command: string) => Promise<MobileNativeChatSendOutcome>>()
+  const dispatchCommand = vi.fn<HookArgs['dispatchCommand']>()
   const onAgentPicker = vi.fn()
 
   function Probe(): null {
@@ -44,7 +44,6 @@ describe('useMobileNativeChatSessionOptions', () => {
   }
 
   beforeEach(() => {
-    globalThis.IS_REACT_ACT_ENVIRONMENT = true
     clearMobileSessionOptionRecordsForTests()
     dispatchCommand.mockReset()
     dispatchCommand.mockResolvedValue('accepted')
@@ -74,6 +73,56 @@ describe('useMobileNativeChatSessionOptions', () => {
     expect(api!.snapshot).toEqual([])
   })
 
+  it('shows an OMP session under the model its hook reported', () => {
+    // OMP seeds no models, so the pill exists only once the hook names one.
+    mount({ agent: 'omp' })
+    expect(api!.snapshot).toEqual([])
+    update({ reportedModel: 'deepseek/deepseek-v4-pro' })
+    const model = api!.snapshot[0]!
+    expect(model).toMatchObject({ id: 'model', category: 'model', valueSource: 'reported' })
+    expect(model.kind).toMatchObject({
+      type: 'select',
+      currentValue: 'deepseek/deepseek-v4-pro',
+      choices: [{ value: 'deepseek/deepseek-v4-pro', label: 'deepseek/deepseek-v4-pro' }]
+    })
+  })
+
+  it.each(['custom/current', 'deepseek/deepseek-v4-pro-new'])(
+    'keeps the exact OMP report %s with discovered choices',
+    (reportedModel) => {
+      mount({
+        agent: 'omp',
+        reportedModel,
+        discoveredModels: [{ id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek', options: [] }]
+      })
+      expect(api!.snapshot[0]).toMatchObject({ valueSource: 'reported' })
+      expect(api!.snapshot[0]!.kind).toMatchObject({
+        currentValue: reportedModel,
+        choices: expect.arrayContaining([expect.objectContaining({ value: reportedModel })])
+      })
+    }
+  )
+
+  it('switches an OMP session with /orca-model <selector>', async () => {
+    mount({
+      agent: 'omp',
+      reportedModel: 'deepseek/deepseek-v4-pro',
+      modelSwitchCommand: 'orca-model'
+    })
+    let applied: boolean | undefined
+    await act(async () => {
+      applied = await api!.setOption('model', 'minimax-cn/MiniMax-M3')
+    })
+    expect(applied).toBe(true)
+    expect(dispatchCommand).toHaveBeenCalledWith('/orca-model minimax-cn/MiniMax-M3')
+    const model = api!.snapshot[0]!
+    expect(model).toMatchObject({ valueSource: 'dispatched' })
+    expect(model.kind).toMatchObject({ currentValue: 'minimax-cn/MiniMax-M3' })
+    // The hook confirming the switch is the next report; a changed value is evidence.
+    update({ reportedModel: 'minimax-cn/MiniMax-M3' })
+    expect(api!.snapshot[0]).toMatchObject({ valueSource: 'reported' })
+  })
+
   it('applies a model pick through the catalog modelApply command', async () => {
     mount()
     let applied: boolean | undefined
@@ -98,14 +147,23 @@ describe('useMobileNativeChatSessionOptions', () => {
     expect(api!.snapshot[0]).toMatchObject({ valueSource: 'unknown' })
   })
 
-  it('applies Codex model changes through the native command', async () => {
+  it('types the Codex picker command and switches to the terminal', async () => {
     mount({ agent: 'codex' })
-    expect(api!.snapshot[0]?.action).toBeUndefined()
+    expect(api!.snapshot[0]?.action).toEqual({ type: 'agent-picker' })
     await act(async () => {
-      await api!.setOption('model', 'gpt-5.5')
+      await api!.invokeAction('model')
     })
-    expect(dispatchCommand).toHaveBeenCalledWith('/model gpt-5.5')
-    expect(onAgentPicker).not.toHaveBeenCalled()
+    expect(dispatchCommand).toHaveBeenCalledWith('/model', { delivery: 'type' })
+    expect(onAgentPicker).toHaveBeenCalledOnce()
+  })
+
+  it('types the Codex effort picker command', async () => {
+    mount({ agent: 'codex', reportedModel: 'gpt-5.5' })
+    await act(async () => {
+      await api!.invokeAction('effort')
+    })
+    expect(dispatchCommand).toHaveBeenCalledWith('/model', { delivery: 'type' })
+    expect(onAgentPicker).toHaveBeenCalledOnce()
   })
 
   it('seeds the current model from a hook-reported provider model', () => {
@@ -164,7 +222,7 @@ describe('useMobileNativeChatSessionOptions', () => {
     })
     expect(api!.snapshot[0]!.kind).toMatchObject({ currentValue: 'opus' })
     // Leaving the tab and returning re-delivers the SAME session-start report,
-    // which cannot have observed the `/model opus` sent after it.
+    // which cannot have observed the `/orca-model opus` sent after it.
     update({ scopeKey: 'host\0worktree\0other' })
     update({ scopeKey: 'host\0worktree\0tab' })
     expect(api!.snapshot[0]).toMatchObject({ valueSource: 'dispatched' })

@@ -17,6 +17,7 @@ vi.mock('react-native', () => ({
 
 vi.mock('lucide-react-native', () => ({
   Check: 'Check',
+  Copy: 'Copy',
   Pencil: 'Pencil',
   Play: 'Play',
   Plus: 'Plus',
@@ -24,14 +25,22 @@ vi.mock('lucide-react-native', () => ({
   Trash2: 'Trash2'
 }))
 
+vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn() }))
+
+// The row buzzes when a copy is refused, and the real module reads `__DEV__` at import.
+vi.mock('expo-haptics', () => ({
+  notificationAsync: vi.fn(),
+  performAndroidHapticsAsync: vi.fn(),
+  AndroidHaptics: { Reject: 'reject' },
+  NotificationFeedbackType: { Error: 'error', Success: 'success' }
+}))
+
 vi.mock('../components/MobileAgentIcon', () => ({ MobileAgentIcon: 'MobileAgentIcon' }))
 
 describe('QuickCommandsList search', () => {
   let renderer: ReactTestRenderer | null = null
 
-  beforeEach(() => {
-    globalThis.IS_REACT_ACT_ENVIRONMENT = true
-  })
+  beforeEach(() => {})
 
   afterEach(() => {
     act(() => renderer?.unmount())

@@ -1,3 +1,10 @@
+import {
+  clampUtf8TextTail,
+  getUtf8ByteLength,
+  isUtf8ByteLengthWithinLimit
+} from './utf8-byte-limits'
+import { ownRetainedString } from './own-retained-string'
+
 export const PR_CHECK_LOG_TAIL_LINES = 200
 export const PR_CHECK_LOG_TAIL_RECENT_LINES = 100
 export const PR_CHECK_LOG_TAIL_BYTES = 16 * 1024
@@ -10,66 +17,48 @@ export const PR_CHECK_LOG_TAIL_EARLIER_SEPARATOR = '… earlier errors …'
 const ERROR_LINE_PATTERN =
   /(?:##\[error\]|::error::|::error\b|\berror:|FAILED|exit code|ENOENT|EACCES|panic:|AssertionError)/i
 
-// Why: this slicer runs in main (GitHub/GitLab log fetches) and in the renderer
-// (defensive re-slice of traces from older remote runtimes), so no Buffer.
-function utf8ByteLength(text: string): number {
-  let bytes = 0
-  for (const character of text) {
-    const codePoint = character.codePointAt(0) ?? 0
-    bytes += codePoint < 0x80 ? 1 : codePoint < 0x800 ? 2 : codePoint < 0x10000 ? 3 : 4
-  }
-  return bytes
-}
-
 function applyLogTailByteCap(text: string): string {
-  if (utf8ByteLength(text) <= PR_CHECK_LOG_TAIL_BYTES) {
+  if (isUtf8ByteLengthWithinLimit(text, PR_CHECK_LOG_TAIL_BYTES)) {
     return text
   }
-  return sliceTrailingTextByUtf8Bytes(text, PR_CHECK_LOG_TAIL_BYTES)
-}
-
-function sliceTrailingTextByUtf8Bytes(text: string, byteLimit: number): string {
-  let byteLength = 0
-  const characters = Array.from(text)
-  for (let index = characters.length - 1; index >= 0; index -= 1) {
-    const characterByteLength = utf8ByteLength(characters[index] ?? '')
-    if (byteLength + characterByteLength > byteLimit) {
-      return characters.slice(index + 1).join('')
-    }
-    byteLength += characterByteLength
-  }
-  return text
+  return clampUtf8TextTail(text, PR_CHECK_LOG_TAIL_BYTES).text
 }
 
 function joinLogExcerptWithByteCap(prefixLines: string[], recentLines: string[]): string {
   const prefix = prefixLines.join('\n')
-  const prefixByteLength = utf8ByteLength(prefix)
+  // UTF-16 length is a lower bound; oversized prefixes need no exact byte count.
+  const prefixByteLength =
+    prefix.length >= PR_CHECK_LOG_TAIL_BYTES ? PR_CHECK_LOG_TAIL_BYTES : getUtf8ByteLength(prefix)
   if (prefixByteLength >= PR_CHECK_LOG_TAIL_BYTES) {
-    return sliceTrailingTextByUtf8Bytes(prefix, PR_CHECK_LOG_TAIL_BYTES)
+    return clampUtf8TextTail(prefix, PR_CHECK_LOG_TAIL_BYTES).text
   }
 
   const separator = prefix.length > 0 && recentLines.length > 0 ? '\n' : ''
-  const recentBudget = PR_CHECK_LOG_TAIL_BYTES - prefixByteLength - utf8ByteLength(separator)
-  const recentTail = sliceTrailingTextByUtf8Bytes(recentLines.join('\n'), recentBudget)
+  const recentBudget = PR_CHECK_LOG_TAIL_BYTES - prefixByteLength - getUtf8ByteLength(separator)
+  const recentTail = clampUtf8TextTail(recentLines.join('\n'), recentBudget).text
   return `${prefix}${separator}${recentTail}`
 }
 
 function collectEarlierErrorLineIndexes(lines: string[], recentStart: number): number[] {
   const indexes = new Set<number>()
-  for (let index = 0; index < recentStart; index += 1) {
+  // Newest-first errors and descending windows add the newest unique indexes first.
+  for (let index = recentStart - 1; index >= 0; index -= 1) {
     if (!ERROR_LINE_PATTERN.test(lines[index] ?? '')) {
       continue
     }
     const contextStart = Math.max(0, index - PR_CHECK_LOG_TAIL_ERROR_CONTEXT_LINES)
     const contextEnd = Math.min(recentStart - 1, index + PR_CHECK_LOG_TAIL_ERROR_CONTEXT_LINES)
-    for (let contextIndex = contextStart; contextIndex <= contextEnd; contextIndex += 1) {
+    for (let contextIndex = contextEnd; contextIndex >= contextStart; contextIndex -= 1) {
       indexes.add(contextIndex)
+      if (indexes.size === PR_CHECK_LOG_TAIL_MAX_EARLIER_LINES) {
+        return [...indexes].sort((left, right) => left - right)
+      }
     }
   }
   return [...indexes].sort((left, right) => left - right)
 }
 
-export function sliceCheckLogTail(logText: string): string {
+function buildCheckLogTail(logText: string): string {
   const lines = logText.split(/\r?\n/)
   const recentStart = Math.max(0, lines.length - PR_CHECK_LOG_TAIL_RECENT_LINES)
   const recentLines = lines.slice(recentStart)
@@ -91,4 +80,9 @@ export function sliceCheckLogTail(logText: string): string {
     [...earlierLines, PR_CHECK_LOG_TAIL_EARLIER_SEPARATOR],
     recentLines
   )
+}
+
+export function sliceCheckLogTail(logText: string): string {
+  // Cached excerpts must not pin the downloaded log behind a small V8 slice.
+  return ownRetainedString(buildCheckLogTail(logText))
 }

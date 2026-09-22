@@ -15,19 +15,9 @@ import { getReleaseNotesUrlForVersion } from '../../../../shared/release-channel
 
 export function GeneralUpdateSettingsSection(): React.JSX.Element {
   const updateStatus = useAppStore((s) => s.updateStatus)
-  // Why: the 'error' variant of UpdateStatus does not carry a `version` field.
-  // The main process emits `{ state: 'error' }` for both check failures (no
-  // version known yet) and download/install failures (version was known from
-  // the preceding 'available'/'downloading'/'downloaded' state). Cache the
-  // last-known version so the error copy below can distinguish the two cases
-  // without adding IPC. Mirrors `versionRef` in UpdateCard.tsx.
+  // Why: older hosts omit `version` from errors, so retain the last target for correct copy.
   const updateVersionRef = useRef<string | null>(null)
-  if (
-    (updateStatus.state === 'available' ||
-      updateStatus.state === 'downloading' ||
-      updateStatus.state === 'downloaded') &&
-    updateStatus.version
-  ) {
+  if ('version' in updateStatus && updateStatus.version) {
     updateVersionRef.current = updateStatus.version
   } else if (
     updateStatus.state === 'checking' ||
@@ -125,7 +115,8 @@ export function GeneralUpdateSettingsSection(): React.JSX.Element {
 
           {/* Fork: no install/download action — updates go through merge +
               rebuild (orca-fork-update), never an official-binary self-replace. */}
-          {FORK_SELF_UPDATE_DISABLED ? null : updateStatus.state === 'available' ? (
+          {FORK_SELF_UPDATE_DISABLED ? null : updateStatus.state === 'available' &&
+            !updateStatus.externallyManaged ? (
             <Button
               variant="default"
               size="sm"
@@ -147,7 +138,7 @@ export function GeneralUpdateSettingsSection(): React.JSX.Element {
               <Download className="size-3.5" />
               {translate(
                 'auto.components.settings.GeneralUpdateSettingsSection.42717918f4',
-                'Install Update ('
+                'Download Update ('
               )}
               {updateStatus.version})
             </Button>
@@ -186,10 +177,15 @@ export function GeneralUpdateSettingsSection(): React.JSX.Element {
                     'fork.settings.update.available',
                     'is available. This is a fork build — update by merging upstream and rebuilding (orca-fork-update), not from here.'
                   )
-                : translate(
-                    'auto.components.settings.GeneralUpdateSettingsSection.8311da27ba',
-                    'is available. Click "Install Update" to download and install it.'
-                  )}{' '}
+                : updateStatus.externallyManaged
+                  ? translate(
+                      'auto.components.settings.GeneralUpdateSettingsSection.e3b9d21c07',
+                      'is available. Update Orca through your system package manager — Orca cannot install this release itself.'
+                    )
+                  : translate(
+                      'auto.components.settings.GeneralUpdateSettingsSection.8311da27ba',
+                      'is available. Click "Download Update" to download it.'
+                    )}{' '}
               {updateStatus.source !== 'local' && (
                 <a
                   href={
@@ -247,22 +243,19 @@ export function GeneralUpdateSettingsSection(): React.JSX.Element {
             </>
           )}
           {updateStatus.state === 'error' &&
-            // Why: `{ state: 'error' }` is emitted for both check-time
-            // failures (no version cached) and download/install failures
-            // (version cached from a prior 'available'/'downloading'/
-            // 'downloaded' state). Label accordingly so a download failure
-            // isn't mislabeled as a "check" failure. Mirrors UpdateCard.tsx.
-            (updateVersionRef.current
-              ? translate(
-                  'auto.components.settings.GeneralUpdateSettingsSection.b9ad70c30d',
-                  'Update error. {{value0}}',
-                  { value0: updateStatus.message }
-                )
-              : translate(
-                  'auto.components.settings.GeneralUpdateSettingsSection.bd79d412f0',
-                  'Update check failed. {{value0}}',
-                  { value0: updateStatus.message }
-                ))}
+            (updateStatus.recovery?.kind === 'linux-package-install'
+              ? updateStatus.message
+              : updateVersionRef.current
+                ? translate(
+                    'auto.components.settings.GeneralUpdateSettingsSection.b9ad70c30d',
+                    'Update error. {{value0}}',
+                    { value0: updateStatus.message }
+                  )
+                : translate(
+                    'auto.components.settings.GeneralUpdateSettingsSection.bd79d412f0',
+                    'Update check failed. {{value0}}',
+                    { value0: updateStatus.message }
+                  ))}
         </p>
       </SearchableSetting>
       {channelSwitcherRevealed ? <ReleaseChannelSection /> : null}

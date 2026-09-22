@@ -27,6 +27,7 @@ describe('agent-hook-relay wire shape', () => {
       compactTrigger: 'manual',
       payload: {
         state: 'working',
+        workingMode: 'monitoring',
         prompt: 'roundtrip',
         agentType: 'claude'
       }
@@ -36,6 +37,7 @@ describe('agent-hook-relay wire shape', () => {
     expect(decoded).toEqual(envelope)
     expect(decoded.connectionId).toBeNull()
     expect(decoded.payload.prompt).toBe('roundtrip')
+    expect(decoded.payload.workingMode).toBe('monitoring')
   })
 
   it('exposes stable JSON-RPC method names', () => {
@@ -47,6 +49,7 @@ describe('agent-hook-relay wire shape', () => {
   it('validates hook sources crossing persisted and relay trust boundaries', () => {
     expect(isAgentHookSource('claude')).toBe(true)
     expect(isAgentHookSource('kimi')).toBe(true)
+    expect(isAgentHookSource('prime-agent')).toBe(true)
     expect(isAgentHookSource('claude\0codex')).toBe(false)
     expect(isAgentHookSource('unknown')).toBe(false)
     expect(isAgentHookSource({ source: 'claude' })).toBe(false)

@@ -4,12 +4,20 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { translate } from '@/i18n/i18n'
 import { cn } from '@/lib/utils'
+import {
+  isAutomationListArrowKey,
+  shouldHandleAutomationListSearchArrowKey,
+  shouldHandleAutomationListSearchEnterKey,
+  type AutomationListArrowKey
+} from './automation-list-keyboard-navigation'
 
 type AutomationListSearchFieldProps = {
   query: string
   isTooLarge: boolean
   onQueryChange: (query: string) => void
   onClear: () => void
+  onArrowNavigate?: (key: AutomationListArrowKey) => void
+  onEnter?: () => void
   className?: string
 }
 
@@ -18,6 +26,8 @@ export function AutomationListSearchField({
   isTooLarge,
   onQueryChange,
   onClear,
+  onArrowNavigate,
+  onEnter,
   className
 }: AutomationListSearchFieldProps): React.JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -34,6 +44,8 @@ export function AutomationListSearchField({
       <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
       <Input
         ref={inputRef}
+        type="text"
+        autoFocus
         value={query}
         aria-label={translate(
           'auto.components.automations.AutomationListSearchField.label',
@@ -41,7 +53,7 @@ export function AutomationListSearchField({
         )}
         placeholder={translate(
           'auto.components.automations.AutomationListSearchField.placeholder',
-          'Search by name, project, or prompt'
+          'Search...'
         )}
         aria-invalid={isTooLarge || undefined}
         aria-describedby={isTooLarge ? 'automations-list-search-too-large' : undefined}
@@ -49,11 +61,27 @@ export function AutomationListSearchField({
         // so the first Escape clears the query without also losing focus.
         data-escape-clears-value={hasText ? 'true' : undefined}
         className={cn(
-          'h-8 border-border/60 bg-background pl-8 text-xs',
+          // Flat list search: no elevation/halo; soft focus border only.
+          'h-8 border-border bg-background pl-8 text-xs shadow-none focus-visible:border-ring/70 focus-visible:ring-0 dark:bg-background',
           hasText && (isTooLarge ? 'pr-20' : 'pr-7')
         )}
         onChange={(event) => onQueryChange(event.target.value)}
         onKeyDown={(event) => {
+          if (
+            onArrowNavigate &&
+            isAutomationListArrowKey(event.key) &&
+            shouldHandleAutomationListSearchArrowKey(event)
+          ) {
+            // Why: ArrowUp/Down should step the visible list instead of moving the input caret.
+            event.preventDefault()
+            onArrowNavigate(event.key)
+            return
+          }
+          if (onEnter && shouldHandleAutomationListSearchEnterKey(event)) {
+            event.preventDefault()
+            onEnter()
+            return
+          }
           if (event.key !== 'Escape' || event.nativeEvent.isComposing) {
             return
           }

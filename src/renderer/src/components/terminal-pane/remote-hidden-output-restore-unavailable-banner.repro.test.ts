@@ -85,7 +85,6 @@ type MockTransport = {
 
 const scheduleRuntimeGraphSync = vi.fn()
 const shouldSeedCacheTimerOnInitialTitle = vi.fn(() => false)
-const scheduleTerminalWebglAtlasRecovery = vi.fn()
 const toastInfo = vi.fn()
 const notifyCodexPaneBoundForStaleSweep = vi.fn()
 
@@ -108,10 +107,6 @@ vi.mock('@/store', () => ({
       }
     }
   }
-}))
-
-vi.mock('./terminal-webgl-atlas-recovery', () => ({
-  scheduleTerminalWebglAtlasRecovery
 }))
 
 vi.mock('@/lib/agent-status', async (importOriginal) => {
@@ -550,7 +545,6 @@ describe('remote hidden-output restore abandonment (issue2-hidden-output-skip)',
         >
         return byPaneKey[entry.paneKey]?.launchConfig
       }),
-      getAgentLaunchConfigForStatusMetadata: vi.fn(() => undefined),
       clearSleepingAgentSession: vi.fn((paneKey: string) => {
         delete (mockStoreState.sleepingAgentSessionsByPaneKey as Record<string, unknown>)[paneKey]
       }),

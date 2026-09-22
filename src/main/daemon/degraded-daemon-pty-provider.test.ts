@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { DegradedDaemonPtyProvider } from './degraded-daemon-pty-provider'
 import { DEGRADED_DAEMON_RECOVERY_RETRY_MS } from './degraded-daemon-fresh-spawn-routing'
 import type { DaemonPtyAdapter } from './daemon-pty-adapter'
+import { settledWriteStub, stubWriteSettlement } from '../providers/settled-pty-write-stub'
 import type { IPtyProvider, PtySpawnOptions, PtySpawnResult } from '../providers/types'
 import type { PtyProcessInspection } from '../providers/pty-process-inspection'
 import { SessionNotFoundError, TerminalSessionOwnerUnverifiedError } from './daemon-errors'
@@ -37,6 +38,7 @@ function createProvider(
     probePtyLiveness: vi.fn(async (id: string) => sessions.includes(id)),
     providesAgentSessionOwnerListings: vi.fn(() => authoritativeOwnerListings),
     write: vi.fn(),
+    writeWithSettlement: vi.fn(settledWriteStub()),
     resize: vi.fn(),
     shutdown: vi.fn(async (id: string) => {
       const idx = sessions.indexOf(id)
@@ -270,12 +272,13 @@ it('rejects completion inspection instead of borrowing the fallback provider', a
   await expect(provider.inspectProcess('unmapped-session')).rejects.toThrow('terminal_gone')
 })
 
-it('preserves unavailable inspection from an owning daemon', async () => {
+it('preserves client-only unverifiable inspection from an owning daemon', async () => {
   const daemon = createDaemonAdapter('daemon', ['daemon-session'])
   vi.mocked(daemon.inspectProcess).mockResolvedValue({
     foregroundProcess: null,
-    hasChildProcesses: true,
-    unavailable: true
+    hasChildProcesses: false,
+    verdict: 'unverifiable',
+    reason: 'old_host'
   })
   const provider = new DegradedDaemonPtyProvider({
     current: daemon,
@@ -286,8 +289,9 @@ it('preserves unavailable inspection from an owning daemon', async () => {
 
   await expect(provider.inspectProcess('daemon-session')).resolves.toEqual({
     foregroundProcess: null,
-    hasChildProcesses: true,
-    unavailable: true
+    hasChildProcesses: false,
+    verdict: 'unverifiable',
+    reason: 'old_host'
   })
 })
 
@@ -315,6 +319,20 @@ describe('DegradedDaemonPtyProvider', () => {
     await expect(provider.attach('wt-1@@learned')).resolves.toBeUndefined()
     expect(current.attach).toHaveBeenCalledWith('wt-1@@learned')
     expect(fallback.attach).not.toHaveBeenCalled()
+  })
+
+  it('forwards the owning daemon sequence from attach', async () => {
+    const legacy = createDaemonAdapter('legacy', ['daemon-session'])
+    const providerSequence = { value: 204, generation: 'continued' as const }
+    vi.mocked(legacy.attach).mockResolvedValueOnce({ providerSequence })
+    const provider = new DegradedDaemonPtyProvider({
+      current: createDaemonAdapter('current'),
+      legacy: [legacy],
+      fallback: createProvider('fallback')
+    })
+    await provider.discoverDaemonSessions()
+
+    await expect(provider.attach('daemon-session')).resolves.toEqual({ providerSequence })
   })
 
   it('only delegates owner-listing authority to the provider that owns the id', async () => {
@@ -356,6 +374,24 @@ describe('DegradedDaemonPtyProvider', () => {
     expect(fallback.spawn).toHaveBeenCalledWith({ cols: 80, rows: 24 })
     expect(current.write).toHaveBeenCalledWith('daemon-session', 'old\n')
     expect(fallback.write).toHaveBeenCalledWith(fresh.id, 'new\n')
+  })
+
+  it('preserves settlement through daemon and fallback routes', async () => {
+    const current = createDaemonAdapter('daemon', ['daemon-session'])
+    const fallback = createProvider('fallback')
+    vi.mocked(current.writeWithSettlement).mockResolvedValue(stubWriteSettlement(false))
+    const provider = new DegradedDaemonPtyProvider({ current, legacy: [], fallback })
+    await provider.discoverDaemonSessions()
+    const fresh = await provider.spawn({ cols: 80, rows: 24 })
+
+    await expect(provider.writeWithSettlement('daemon-session', 'old')).resolves.toEqual(
+      stubWriteSettlement(false)
+    )
+    await expect(provider.writeWithSettlement(fresh.id, 'new')).resolves.toEqual(
+      stubWriteSettlement(true)
+    )
+    expect(current.writeWithSettlement).toHaveBeenCalledWith('daemon-session', 'old')
+    expect(fallback.writeWithSettlement).toHaveBeenCalledWith(fresh.id, 'new')
   })
 
   it('routes later fresh PTYs to the daemon after spawn health recovers', async () => {

@@ -25,30 +25,45 @@ test('cmd+p quick open prioritizes the filename and reveals the full path on hov
   })
   const dialog = orcaPage.getByRole('dialog', { name: 'Go to file' })
   await expect(dialog).toBeVisible()
+  const inputBox = await dialog.locator('[data-cmdk-input-wrapper]').boundingBox()
+  expect(inputBox).not.toBeNull()
+  expect(inputBox!.height).toBeLessThanOrEqual(45)
   const input = dialog.locator('input[placeholder="Go to file..."]')
   await input.fill('QuickOpenTarget')
 
   const row = dialog.getByRole('option').filter({ hasText: 'QuickOpenTarget.tsx' }).first()
   await expect(row).toBeVisible()
   await expect(row).toContainText('packages/orca/src/renderer/src/components/navigation/')
+  const rowBox = await row.boundingBox()
+  expect(rowBox).not.toBeNull()
+  expect(rowBox!.height).toBeLessThanOrEqual(29)
   const rowText = await row.textContent()
   expect(rowText?.indexOf('QuickOpenTarget.tsx')).toBeLessThan(
     rowText?.indexOf('packages/orca/src/renderer/src/components/navigation/') ?? -1
   )
 
-  // Two hovers on purpose: results stream in and remount the row, and Radix only
-  // opens on a pointermove it actually receives. A single hover can land before
-  // the remount and leave the cursor sitting still over a row that never saw it.
-  await row.hover({ position: { x: 20, y: 12 } })
-  await orcaPage.waitForTimeout(250)
-  await row.hover({ position: { x: 40, y: 12 } })
+  const tooltip = orcaPage
+    .locator('[data-slot="tooltip-content"]')
+    .filter({ hasText: relativeFilePath })
+  // Streaming results can remount the row under a stationary pointer, and a
+  // tooltip left open from a prior attempt can swallow the next hover.
+  await expect(async () => {
+    await orcaPage.mouse.move(8, 8)
+    const currentRow = dialog.getByRole('option').filter({ hasText: 'QuickOpenTarget.tsx' }).first()
+    await expect(currentRow).toBeVisible()
+    const currentBox = await currentRow.boundingBox()
+    if (!currentBox) {
+      throw new Error('Quick Open result remounted before hover')
+    }
+    await orcaPage.mouse.move(currentBox.x + 20, currentBox.y + 12)
+    await orcaPage.mouse.move(currentBox.x + 40, currentBox.y + 12)
+    await expect(tooltip).toBeVisible({ timeout: 2_000 })
+  }).toPass({ timeout: 15_000, intervals: [100, 250, 500] })
 
   // Exact cursor placement is arithmetic, unit-tested via cursorTooltipOffsets.
   // Asserting it here measures the app mid-reflow and is flaky; what E2E is
   // uniquely good for is that the tooltip really opens with the whole path.
-  await expect(
-    orcaPage.locator('[data-slot="tooltip-content"]').filter({ hasText: relativeFilePath })
-  ).toBeVisible()
+  await expect(tooltip).toBeVisible()
 
   const proofPath = process.env.ORCA_QUICK_OPEN_PROOF_PATH
   if (proofPath) {

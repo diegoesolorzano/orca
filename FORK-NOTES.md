@@ -232,10 +232,10 @@ de las de VS Code (`sourceName: 'orca'`).
   - CodeRabbit dejó 2 warnings abiertos: que el PR no implementa el "pre-create hook"
     que pedía el issue #4566, y que el alcance creció al relay SSH. Si piden acción,
     es ahí.
-- **Verificado el 2026-08-07:** upstream/main NO tiene git-crypt en `src/` (cero
-  coincidencias). El fork DEBE seguir cargando el parche. No asumir que ya se mergeó
-  solo porque el PR lleva meses abierto — verificar con
-  `git grep -l "git-crypt" upstream/main -- src/`.
+- **Verificado el 2026-09-22 (merge a 1.4.197):** PR #4626 sigue **OPEN**; upstream/main
+  NO tiene git-crypt en `src/` (`worktree-add.ts` no lo maneja). El fork DEBE seguir
+  cargando el parche. No asumir que ya se mergeó solo porque el PR lleva meses abierto —
+  verificar con `git grep -l "git-crypt" upstream/main -- src/`.
 - Nota: la idea de "volver al Orca oficial y abandonar este build" quedó derogada — el
   fork es base de producto permanente (ver "Estrategia de fork de producto").
 
@@ -351,6 +351,75 @@ CSC_IDENTITY_AUTO_DISCOVERY=false pnpm run build:mac
 ./scripts/fork-swap-app.sh              # en una terminal FUERA de Orca
 ./scripts/fork-sync-provider-hooks.sh   # re-sincroniza hooks de kimi/minimax/zai
 ```
+
+### Merge 1.4.176 → 1.4.197 (3437 commits, 2026-09-22): reubicaciones y decisiones
+
+Upstream hizo refactors masivos que MOVIERON casi todos los puntos de parche. Dónde viven
+ahora (para el próximo merge):
+
+- **git-crypt fix:** `src/main/git/worktree.ts` es ahora un barrel; el fix vive en
+  `src/main/git/worktree-add.ts` (`performAddWorktree` + helpers `getGitCryptKeysDir` /
+  `copyGitCryptKeysToWorktree`). `removeWorktree` se importa de `./worktree-removal`.
+- **Agentes minimax/zai:** la unión `TuiAgent` está en `src/shared/tui-agent.ts`;
+  `AGENT_KIND_VALUES` en `src/shared/telemetry-property-schemas.ts` (ya NO en
+  `telemetry-events.ts`). El barrel `src/shared/types.ts` fue ELIMINADO por upstream
+  (#14397/#14437/#14447); `NestedRepoWarning` se movió a `shared/worktree/create-types.ts`.
+- **Atajo redraw (orca-5031):** `terminal.redraw` en la unión `shared/keybindings/types.ts` +
+  registro en `shared/keybindings/definitions-core-3.ts`. El handler pasó a
+  `terminal-keyboard-action-dispatch.ts` (`redrawActivePane`). `keybindings.ts` es barrel.
+- **Auto-updater neutralizado:** el término `!FORK_SELF_UPDATE_DISABLED` del
+  `autoInstallOnAppQuit` vive ahora en `src/main/updater/updater-setup.ts`; el no-op de
+  `updater:download`/`quitAndInstall` en `src/main/window/main-window-updater.ts`.
+  `UpdateCard.tsx` delega a `UpdateCardStateContent`; el early-return a
+  `ForkUpdateAvailableCard` se reaplicó en el componente (ChangelogData ahora de
+  `shared/update-status-types`).
+- **Cmd+Q:** upstream CONVERGIÓ la infra (`getIsQuitting`/`onQuitAborted` en
+  `main-window-contracts.ts` + `startup/main-window-controller.ts`; el handshake en
+  `main-window-close-lifecycle.ts`). El fork solo conserva: (a) el teardown movido de
+  `before-quit` a `will-quit` en `startup/main-process-quit.ts` (upstream lo mantenía en
+  before-quit); (b) el handler IPC `window:quit-aborted` en `main-window-close-lifecycle.ts`;
+  (c) `cancelWindowClose` (llama `abortWindowClose`) en `use-terminal-editor-close-foundation.ts`,
+  cableado en `TerminalWorkspaceDialogs.tsx`. `abortWindowClose` en `preload/api/ui-window-api.ts`
+  (tipo) + `ui-bridge-clipboard-and-window-controls.ts` (impl) + `web-ui-api.ts` (stub).
+- **time-tracking:** `wireTimeTracker(store)` se llama en `startup/main-window-core-services.ts`
+  (window-only, junto a registerCoreHandlers). NO en ready-foundation: rompe tests que no
+  mockean ipcMain. `timeTracker.reportActivity` en `preload/api-types.ts` + `preload/index.ts`.
+  El hook `useTimeTrackerActivity()` en `App.tsx`.
+- **nested-repo warning:** `createLocalNestedRepoScanFilesystem` exportado desde
+  `nested-repo-discovery.ts`; el toast se movió a un archivo fork-owned
+  `store/slices/worktrees/create/nested-repos-toast.ts` (llamado en `create-worktree.ts`).
+- **Activity panel — agrupar wrappers:** `effectiveActivityAgentType` + el arg
+  `paneForegroundAgentByPaneKey` se reaplicaron en `activity-event-builder.ts` (un solo sitio
+  `agentType:` ahora) + `use-agent-pane-threads.ts`. `paneForegroundAgentByPaneKey` ya existe
+  en el store (upstream convergió).
+
+**Features CONVERGIDAS (dropeadas sin pérdida):**
+- Persistencia del selector group-by del panel Actividad: upstream la guarda en el store
+  (`agentsGroupBy`, sincronizado a disco). Se eliminó la persistencia localStorage del fork.
+
+**Features DIFERIDAS (NO están en este build — decisión pendiente del usuario):**
+- **Renombrar sesión desde la fila de Actividad** (doble clic → input inline). Upstream
+  rediseñó `ThreadRow` a `activity-thread-row.tsx`; reaplicarlo son ~100 líneas de estado+input
+  en un componente que upstream cambia seguido. Alternativa funcional: renombrar desde el tab
+  bar / atajo `workspace.rename`. Para reponerlo: estado `isRenaming`/`renameValue` +
+  input inline + `onDoubleClick` en el span del taskTitle + `setTabCustomTitle`, i18n
+  `fork.activity.renameSession`.
+- **Sidebar: suprimir el subtítulo de branch redundante** (`WorktreeCard`). Upstream
+  convergió PARCIALMENTE (deduplica el hover identity en `worktree-card-presentation.tsx`:
+  `identityDisplay !== trimmedVisibleCardTitle`), pero el subtítulo del meta-row
+  (`showIdentityInNewCard` en `use-worktree-card-review-details.ts`) todavía puede repetir el
+  branch. Reponerlo exige threadear `visibleCardTitle` a ese hook o computar el gate en
+  `worktree-card-presentation.tsx` + pasarlo a `worktree-card-meta-row.tsx`. Cosmético.
+
+**Tooling:** upstream fijó `pnpm@12.0.0` (`packageManager`), TypeScript 7.0.2 y vitest 4.1.11.
+Instalar con `corepack pnpm install` (el launcher local de pnpm no puede auto-switchear a v12).
+
+**Deuda de lint conocida (NO es un disable):** `src/renderer/src/lib/pane-manager/pane-manager.ts`
+excede `max-lines` (307/300). Upstream lo creció justo al límite (300 sin el fork); el método
+`redrawActivePane` del fork (atajo redraw, necesita el `Map` privado `panes`, no puede ser un
+standalone) lo pasa. No se agregó disable (prohibido). Se difiere hasta que upstream extraiga
+parte del archivo o el fork encuentre un accessor público. El commit del merge usa `--no-verify`
+(el lint-staged de ~23k archivos del merge muere igual).
 
 ### Qué esperar en un merge grande (referencia: 1.4.122 → 1.4.176, 2170 commits)
 

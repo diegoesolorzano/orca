@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { RelayDispatcher } from './dispatcher'
+import type { RelayClient } from './dispatcher-contract'
 import type { JsonRpcNotification } from './protocol'
 
 type DispatcherInternals = {
-  primaryClient: object
+  primaryClient: RelayClient
   estimateFrameBytes: (msg: JsonRpcNotification) => number
-  enqueueFrame: (client: object, msg: JsonRpcNotification, lane: string) => boolean
+  enqueueFrame: (client: RelayClient, msg: JsonRpcNotification, lane: string) => boolean
 }
 
 describe('RelayDispatcher frame guards', () => {
@@ -43,5 +44,43 @@ describe('RelayDispatcher frame guards', () => {
     dispatcher.dispose()
     expect(internals.enqueueFrame(internals.primaryClient, msg, 'ordinary')).toBe(false)
     expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('does not serialize notifications without an active client', () => {
+    const dispatcher = new RelayDispatcher(() => true)
+    try {
+      dispatcher.invalidateClient()
+
+      expect(() =>
+        dispatcher.notify('test.event', {
+          data: {
+            toJSON: () => {
+              throw new Error('must not serialize')
+            }
+          }
+        })
+      ).not.toThrow()
+    } finally {
+      dispatcher.dispose()
+    }
+  })
+
+  it('does not serialize pty.data rejected by every active client', () => {
+    const dispatcher = new RelayDispatcher(() => true)
+    const unregister = dispatcher.registerPtyDataPublicationAdmission(() => false)
+    try {
+      expect(() =>
+        dispatcher.notify('pty.data', {
+          data: {
+            toJSON: () => {
+              throw new Error('must not serialize')
+            }
+          }
+        })
+      ).not.toThrow()
+    } finally {
+      unregister()
+      dispatcher.dispose()
+    }
   })
 })

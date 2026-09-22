@@ -4,16 +4,12 @@ import { describe, expect, it, vi } from 'vitest'
 import type { RpcClient } from './rpc-client'
 import { useHostStatusGates, type HostStatusGates } from './host-status-gates'
 
-function suppressReactTestRendererDeprecationWarning(): () => void {
-  const originalConsoleError = console.error
-  const spy = vi.spyOn(console, 'error').mockImplementation((...args) => {
-    if (typeof args[0] === 'string' && args[0].includes('react-test-renderer is deprecated')) {
-      return
-    }
-    originalConsoleError(...args)
-  })
-  return () => spy.mockRestore()
-}
+const recordHostAppVersionMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+
+vi.mock('./host-app-version-store', () => ({
+  normalizeHostAppVersion: (value: unknown) => (typeof value === 'string' ? value : null),
+  recordHostAppVersion: (...args: unknown[]) => recordHostAppVersionMock(...args)
+}))
 
 describe('useHostStatusGates', () => {
   it('clears every prior-host gate and ignores its late response while the client is replaced', async () => {
@@ -43,7 +39,6 @@ describe('useHostStatusGates', () => {
       return null
     }
 
-    const restore = suppressReactTestRendererDeprecationWarning()
     try {
       await act(async () => {
         renderer = create(createElement(Probe, { hostId: 'host-1', client: oldClient }))
@@ -80,7 +75,6 @@ describe('useHostStatusGates', () => {
       expect(oldSendRequest).toHaveBeenCalledOnce()
       expect(newSendRequest).toHaveBeenCalledOnce()
     } finally {
-      restore()
       renderer?.unmount()
     }
   })
@@ -89,6 +83,7 @@ describe('useHostStatusGates', () => {
     const sendRequest = vi.fn().mockResolvedValue({
       ok: true,
       result: {
+        appVersion: '1.4.191',
         capabilities: ['browser.screencast.v1'],
         floatingWorkspaceEnabled: true
       }
@@ -102,20 +97,20 @@ describe('useHostStatusGates', () => {
       return null
     }
 
-    const restore = suppressReactTestRendererDeprecationWarning()
     try {
       await act(async () => {
         renderer = create(createElement(Probe, { hostId: 'host-1' }))
         await Promise.resolve()
       })
       expect(gates).toMatchObject({
+        desktopAppVersion: '1.4.191',
         hostCapabilities: ['browser.screencast.v1'],
         floatingWorkspaceEnabled: true
       })
 
       expect(sendRequest).toHaveBeenCalledOnce()
+      expect(recordHostAppVersionMock).toHaveBeenCalledWith('host-1', '1.4.191')
     } finally {
-      restore()
       renderer?.unmount()
     }
   })
@@ -141,7 +136,6 @@ describe('useHostStatusGates', () => {
       return null
     }
 
-    const restore = suppressReactTestRendererDeprecationWarning()
     try {
       await act(async () => {
         renderer = create(createElement(Probe, { connState: 'connected' }))
@@ -181,7 +175,6 @@ describe('useHostStatusGates', () => {
         statusPending: false
       })
     } finally {
-      restore()
       renderer?.unmount()
     }
   })
@@ -204,7 +197,6 @@ describe('useHostStatusGates', () => {
       return null
     }
 
-    const restore = suppressReactTestRendererDeprecationWarning()
     try {
       await act(async () => {
         renderer = create(createElement(Probe, { client: firstClient }))
@@ -217,7 +209,6 @@ describe('useHostStatusGates', () => {
       })
       expect(gates).toMatchObject({ hostCapabilities: [], statusPending: true })
     } finally {
-      restore()
       renderer?.unmount()
     }
   })

@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, powerMonitor } from 'electron'
-import { splitWorktreeIdForFilesystem } from '../../shared/worktree-id'
+import { splitWorktreeIdForFilesystem } from '../../shared/worktree/id'
 import type { Store } from '../persistence'
 import { createTrackerClient } from './client'
 import { buildCtx, type ContextLookup } from './context'

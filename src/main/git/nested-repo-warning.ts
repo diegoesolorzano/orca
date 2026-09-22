@@ -1,4 +1,4 @@
-import type { NestedRepoWarning } from '../../shared/types'
+import type { NestedRepoWarning } from '../../shared/worktree/create-types'
 import {
   createLocalNestedRepoScanFilesystem,
   scanNestedRepos

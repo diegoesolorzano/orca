@@ -1,11 +1,16 @@
+// Takeover RPCs have their own send-site integration tests; these fixtures script PTY acknowledgements.
+vi.mock('../terminal/worker-terminal-takeover-report', () => ({
+  reportWorkerTerminalUserInput: vi.fn()
+}))
+
 import { createElement } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AskPrompt } from '../../../src/shared/native-chat-ask'
 import type { AgentType } from '../../../src/shared/native-chat-types'
 import type { RpcClient } from '../transport/rpc-client'
 import { markRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
 import { MOBILE_NATIVE_CHAT_QUESTION_STEP_MS } from './mobile-native-chat-answer-stepping'
-import type { AskPrompt } from './mobile-native-chat-ask'
 import {
   isMobileNativeChatInputStale,
   markMobileNativeChatInputStale,
@@ -54,7 +59,6 @@ describe('useMobileNativeChatAnswerSend', () => {
   beforeEach(() => {
     onAccepted = vi.fn()
     vi.useFakeTimers()
-    globalThis.IS_REACT_ACT_ENVIRONMENT = true
     resetMobileNativeChatStaleInputForTests()
     resetMobileNativeChatTerminalWritesForTests()
   })
@@ -93,20 +97,9 @@ describe('useMobileNativeChatAnswerSend', () => {
     mountedClient = client
     mountedOnSendError = onSendError
     mountedAgent = agent
-    const original = console.error
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation((...args) => {
-      if (typeof args[0] === 'string' && args[0].includes('react-test-renderer is deprecated')) {
-        return
-      }
-      original(...args)
+    await act(async () => {
+      renderer = create(createElement(Harness, { enabled: true }))
     })
-    try {
-      await act(async () => {
-        renderer = create(createElement(Harness, { enabled: true }))
-      })
-    } finally {
-      consoleSpy.mockRestore()
-    }
   }
 
   async function setEnabled(enabled: boolean): Promise<void> {
@@ -145,11 +138,17 @@ describe('useMobileNativeChatAnswerSend', () => {
     expect(sendRequest).toHaveBeenCalledTimes(1)
     expect(sendRequest.mock.calls[0]?.[1]).toMatchObject({ text: '1', enter: false })
 
-    await act(async () => vi.advanceTimersByTimeAsync(MOBILE_NATIVE_CHAT_QUESTION_STEP_MS))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(MOBILE_NATIVE_CHAT_QUESTION_STEP_MS)
+    })
     expect(sendRequest.mock.calls[1]?.[1]).toMatchObject({ text: '3', enter: false })
-    await act(async () => vi.advanceTimersByTimeAsync(MOBILE_NATIVE_CHAT_QUESTION_STEP_MS))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(MOBILE_NATIVE_CHAT_QUESTION_STEP_MS)
+    })
     expect(sendRequest.mock.calls[2]?.[1]).toMatchObject({ text: '\x1b[C', enter: false })
-    await act(async () => vi.advanceTimersByTimeAsync(MOBILE_NATIVE_CHAT_QUESTION_STEP_MS))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(MOBILE_NATIVE_CHAT_QUESTION_STEP_MS)
+    })
     await expect(result).resolves.toBe(true)
     expect(sendRequest.mock.calls[3]?.[1]).toMatchObject({ text: '\r', enter: false })
   })
@@ -168,7 +167,9 @@ describe('useMobileNativeChatAnswerSend', () => {
     await act(async () => {
       result = answerSend?.answerAsk(prompt, [{ indices: [1] }, { indices: [0] }])
     })
-    await act(async () => vi.runAllTimersAsync())
+    await act(async () => {
+      await vi.runAllTimersAsync()
+    })
 
     await expect(result).resolves.toBe(true)
     expect(sendRequest.mock.calls.map((call) => call[1])).toEqual([
@@ -198,8 +199,12 @@ describe('useMobileNativeChatAnswerSend', () => {
     await act(async () => {
       result = answerSend?.answerAsk(prompt, [{ indices: [1] }, { indices: [0] }])
     })
-    await act(async () => vi.advanceTimersByTimeAsync(MOBILE_NATIVE_CHAT_QUESTION_STEP_MS))
-    await act(async () => vi.advanceTimersByTimeAsync(MOBILE_NATIVE_CHAT_QUESTION_STEP_MS))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(MOBILE_NATIVE_CHAT_QUESTION_STEP_MS)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(MOBILE_NATIVE_CHAT_QUESTION_STEP_MS)
+    })
 
     await expect(result).resolves.toBe(true)
     // 15s total transport, minus 6s per completed write; the 1s pacing steps are
@@ -216,7 +221,9 @@ describe('useMobileNativeChatAnswerSend', () => {
       // A newline in raw keystrokes would submit early — must collapse to space.
       result = answerSend?.answerAsk(TABS_OR_SPACES, [{ indices: [], other: 'zeta\nspaces' }])
     })
-    await act(async () => vi.runAllTimersAsync())
+    await act(async () => {
+      await vi.runAllTimersAsync()
+    })
 
     await expect(result).resolves.toBe(true)
     expect(sendRequest.mock.calls.map((call) => call[1])).toEqual([
@@ -259,7 +266,9 @@ describe('useMobileNativeChatAnswerSend', () => {
     await act(async () => {
       result = answerSend?.answerAsk(prompt, [{ indices: [1] }, { indices: [0] }])
     })
-    await act(async () => vi.runAllTimersAsync())
+    await act(async () => {
+      await vi.runAllTimersAsync()
+    })
 
     await expect(result).resolves.toBe(true)
     expect(sendRequest.mock.calls.map((call) => call[1])).toEqual([
@@ -361,7 +370,9 @@ describe('useMobileNativeChatAnswerSend', () => {
     await act(async () => {
       result = answerSend?.answerAsk(prompt, [{ indices: [1] }, { indices: [0] }])
     })
-    await act(async () => vi.runAllTimersAsync())
+    await act(async () => {
+      await vi.runAllTimersAsync()
+    })
 
     await expect(result).resolves.toBe(false)
     // The first group DID land, so the remote selector is half-stepped — telling the
@@ -405,7 +416,9 @@ describe('useMobileNativeChatAnswerSend', () => {
     expect(sendRequest).toHaveBeenCalledTimes(1)
 
     await setEnabled(false)
-    await act(async () => vi.runAllTimersAsync())
+    await act(async () => {
+      await vi.runAllTimersAsync()
+    })
 
     await expect(result).resolves.toBe(false)
     expect(sendRequest).toHaveBeenCalledTimes(1)
@@ -462,7 +475,9 @@ describe('useMobileNativeChatAnswerSend', () => {
     await act(async () => {
       second = answerSend?.answerAsk(TABS_OR_SPACES, [{ indices: [1] }])
     })
-    await act(async () => vi.runAllTimersAsync())
+    await act(async () => {
+      await vi.runAllTimersAsync()
+    })
 
     await expect(first).resolves.toBe(false)
     await expect(second).resolves.toBe(false)

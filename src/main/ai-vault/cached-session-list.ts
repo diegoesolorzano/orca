@@ -1,7 +1,13 @@
 import { join } from 'node:path'
-import { scanAiVaultSessions } from './session-scanner'
-import { getWslHomeAsync, listWslDistrosAsync } from '../wsl'
+import {
+  clearAiVaultBackgroundRestartCircuit,
+  resetAiVaultScannerBackgroundForTests,
+  scanAiVaultSessionsInBackground
+} from './session-scanner-background'
+import { getCachedWslDistros, hasCachedWslDistros, listRunningWslHomeDirsAsync } from '../wsl'
+import { filterPathsToRunningWslDistrosAsync } from '../wsl-running-path-filter'
 import type { AiVaultListArgs, AiVaultListResult } from '../../shared/ai-vault-types'
+import type { AiVaultScanOptions } from './session-scanner-types'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import { AiVaultScanCoordinator } from './ai-vault-scan-coordinator'
 import {
@@ -34,9 +40,42 @@ type CachedAiVaultList = {
 let cachedList: CachedAiVaultList | null = null
 let scanCoordinator = new AiVaultScanCoordinator()
 let sources: AiVaultSessionSources = {}
+// Bumped on every invalidation. A scan that started before an invalidation
+// carries the old generation and must not write its (now stale) result back
+// into the cache — otherwise a delete's invalidation is silently undone by an
+// in-flight scan that resolves just after it.
+let cacheGeneration = 0
 
 export function configureAiVaultSessionSources(next: AiVaultSessionSources): void {
   sources = next
+}
+
+/**
+ * The trees a local scan enumerates, resolved fresh because a WSL distro can start
+ * or stop between scans. The search index reads the same function, so it walks
+ * exactly what the session list walks.
+ */
+export async function localAiVaultScanRoots(): Promise<
+  Required<Pick<AiVaultScanOptions, 'additionalCodexSessionsDirs' | 'wslHomeDirs'>> &
+    Pick<AiVaultScanOptions, 'executionHostId'>
+> {
+  const [additionalCodexHomes, wslHomeDirs] = await Promise.all([
+    filterPathsToRunningWslDistrosAsync(configuredAdditionalCodexHomePaths()),
+    getAiVaultWslHomeDirs()
+  ])
+  return {
+    additionalCodexSessionsDirs: additionalCodexHomes.map((homePath) => join(homePath, 'sessions')),
+    wslHomeDirs,
+    // Why: this scan is always host-local; callers addressing this host by a
+    // runtime id get the result restamped at the RPC edge, never rescanned.
+    executionHostId: LOCAL_EXECUTION_HOST_ID
+  }
+}
+
+/** The extra Codex homes session discovery scans. Anything that decides what a listed row may be
+ *  resumed from must read the same set, or a row can be listed and then refuse to resume. */
+export function configuredAdditionalCodexHomePaths(): readonly string[] {
+  return sources.getAdditionalCodexHomePaths?.() ?? []
 }
 
 export async function listAiVaultSessions(
@@ -48,6 +87,9 @@ export async function listAiVaultSessions(
   const depth = requestedAiVaultSessionDepth(args)
   const scanKey = JSON.stringify({ key, depth })
   const now = Date.now()
+  if (args?.force === true) {
+    clearAiVaultBackgroundRestartCircuit()
+  }
   // Why: opening this panel repeatedly should not re-parse hundreds of JSONL
   // transcripts; explicit refreshes bypass the cache and preempt stale scans.
   if (
@@ -58,27 +100,28 @@ export async function listAiVaultSessions(
   ) {
     return truncateAiVaultListResult(cachedList.result, depth, args?.scopePaths)
   }
+  // Captured here, not inside start(): the coordinator defers start() by a
+  // microtask, so an invalidation landing in that gap would otherwise be read
+  // as having happened before this scan and leave the stale result cacheable.
+  const startGeneration = cacheGeneration
   return scanCoordinator.run({
     key: scanKey,
     force: args?.force,
     signal: options.signal,
     start: async (scanSignal) => {
-      const additionalCodexSessionsDirs =
-        sources.getAdditionalCodexHomePaths?.().map((homePath) => join(homePath, 'sessions')) ?? []
-      const result = await scanAiVaultSessions({
-        limit: args?.limit,
-        unlimited: args?.unlimited,
-        scopePaths: args?.scopePaths,
-        additionalCodexSessionsDirs,
-        wslHomeDirs: await getAiVaultWslHomeDirs(),
-        // Cancelled/superseded callers must stop the parse, not just stop
-        // waiting for it — the scan owns hundreds of transcript reads.
-        signal: scanSignal,
-        // Why: this scan is always host-local; callers addressing this host by a
-        // runtime id get the result restamped at the RPC edge, never rescanned.
-        executionHostId: LOCAL_EXECUTION_HOST_ID
-      })
-      if (!scanSignal.aborted) {
+      const result = await scanAiVaultSessionsInBackground(
+        {
+          limit: args?.limit,
+          unlimited: args?.unlimited,
+          scopePaths: args?.scopePaths,
+          ...(await localAiVaultScanRoots())
+        },
+        scanSignal
+      )
+      // A delete (or other invalidation) landed while this scan was running:
+      // its result predates the delete, so caching it would resurrect the
+      // deleted session for the TTL. Return it to this caller but don't cache.
+      if (!scanSignal.aborted && startGeneration === cacheGeneration) {
         const current = cachedList
         if (
           args?.force === true ||
@@ -105,15 +148,31 @@ export async function getAiVaultWslHomeDirs(): Promise<string[]> {
   if (process.platform !== 'win32') {
     return []
   }
-  const homes = await Promise.all(
-    (await listWslDistrosAsync()).map((distro) => getWslHomeAsync(distro))
-  )
-  return homes.filter((homeDir): homeDir is string => Boolean(homeDir))
+  // No installed distro can be running: spares WSL-less hosts the running-distro probe.
+  // Cache read only: a rejected wsl.exe probe yields [] without caching, so it must not
+  // narrow the WSL roots delete/subagent validation trusts; and probing here would let this
+  // listing be the first to cache [] and flip a configured distro to "missing".
+  if (hasCachedWslDistros() && getCachedWslDistros()?.length === 0) {
+    return []
+  }
+  return listRunningWslHomeDirsAsync()
+}
+
+// Drops the scan-result cache after a session is deleted so a non-force
+// list call within the TTL can't still serve the trashed session. Bumping the
+// generation also disarms any scan already in flight, so a scan that started
+// before this call cannot write its pre-delete result back into the cache.
+// Scan discovery itself walks disk first (session-scanner.ts), so a deleted
+// file is never rediscovered — this only guards the cached RESULT.
+export function invalidateAiVaultSessionListCache(): void {
+  cacheGeneration++
+  cachedList = null
 }
 
 // Why: tests reset module-level cache/source state between cases.
 export function resetAiVaultSessionListCacheForTests(): void {
-  cachedList = null
+  invalidateAiVaultSessionListCache()
   scanCoordinator = new AiVaultScanCoordinator()
   sources = {}
+  resetAiVaultScannerBackgroundForTests()
 }

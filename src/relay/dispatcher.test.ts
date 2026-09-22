@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { RelayDispatcher, type SinkWriteSettlement } from './dispatcher'
+import type { PreparedRelayFrame, RelayClient } from './dispatcher-contract'
 import { relayWriterControlReserve } from './dispatcher-writer-admission'
 import {
   encodeJsonRpcFrame,
@@ -723,14 +724,20 @@ describe('RelayDispatcher', () => {
 
   describe('legacy PTY chunk sizing', () => {
     type DispatcherInternals = {
-      primaryClient: object
+      primaryClient: RelayClient
       estimateFrameBytes: (msg: JsonRpcNotification) => number
+      prepareFrame: (msg: JsonRpcNotification) => PreparedRelayFrame
       enqueueFrame: (
-        client: object,
+        client: RelayClient,
         msg: JsonRpcNotification,
         lane: string,
-        onSettled?: (result: SinkWriteSettlement) => void,
-        estimatedBytes?: number
+        onSettled?: (result: SinkWriteSettlement) => void
+      ) => boolean
+      enqueuePreparedFrame: (
+        client: RelayClient,
+        frame: PreparedRelayFrame,
+        lane: string,
+        onSettled?: (result: SinkWriteSettlement) => void
       ) => boolean
     }
 
@@ -840,14 +847,14 @@ describe('RelayDispatcher', () => {
       }
     })
 
-    it('publishes PTY data with a single frame estimate', () => {
+    it('publishes PTY data with a single frame preparation', () => {
       const frames: Buffer[] = []
       const publisher = new RelayDispatcher((data) => {
         frames.push(Buffer.from(data))
         return true
       })
       try {
-        const spy = vi.spyOn(publisher as unknown as DispatcherInternals, 'estimateFrameBytes')
+        const spy = vi.spyOn(publisher as unknown as DispatcherInternals, 'prepareFrame')
         expect(publisher.tryNotifyPtyData({ id: 'pty-1', data: 'hello' })).toBe(true)
         expect(frames).toHaveLength(1)
         expect(spy).toHaveBeenCalledTimes(1)
@@ -856,7 +863,7 @@ describe('RelayDispatcher', () => {
       }
     })
 
-    it('enqueueFrame with a caller-supplied estimate matches the computed default', () => {
+    it('a prepared enqueue matches the composition wrapper', () => {
       const frames: Buffer[] = []
       const publisher = new RelayDispatcher((data) => {
         frames.push(Buffer.from(data))
@@ -871,12 +878,10 @@ describe('RelayDispatcher', () => {
         }
         expect(internals.enqueueFrame(internals.primaryClient, msg, 'ordinary')).toBe(true)
         expect(
-          internals.enqueueFrame(
+          internals.enqueuePreparedFrame(
             internals.primaryClient,
-            msg,
-            'ordinary',
-            undefined,
-            internals.estimateFrameBytes(msg)
+            internals.prepareFrame(msg),
+            'ordinary'
           )
         ).toBe(true)
         expect(frames).toHaveLength(2)
@@ -888,7 +893,7 @@ describe('RelayDispatcher', () => {
       }
     })
 
-    it('enqueueFrame rejects identically with and without a caller-supplied estimate', () => {
+    it('a prepared enqueue rejects identically to the composition wrapper', () => {
       const { sized } = makeDispatcher([1030])
       try {
         const internals = sized as unknown as DispatcherInternals
@@ -899,12 +904,10 @@ describe('RelayDispatcher', () => {
         }
         expect(internals.enqueueFrame(internals.primaryClient, msg, 'ordinary')).toBe(false)
         expect(
-          internals.enqueueFrame(
+          internals.enqueuePreparedFrame(
             internals.primaryClient,
-            msg,
-            'ordinary',
-            undefined,
-            internals.estimateFrameBytes(msg)
+            internals.prepareFrame(msg),
+            'ordinary'
           )
         ).toBe(false)
       } finally {

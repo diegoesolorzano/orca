@@ -1,4 +1,4 @@
-import type { TuiAgent } from './types'
+import type { TuiAgent } from './tui-agent'
 
 /**
  * The community `skills` CLI's own `--agent` key for each agent Orca detects.
@@ -19,9 +19,11 @@ export const SKILLS_CLI_AGENT_KEY_BY_TUI_AGENT = {
   codex: 'codex',
   autohand: 'autohand-code',
   opencode: 'opencode',
+  opencode2: 'opencode',
   'mimo-code': null,
   pi: 'pi',
   omp: null,
+  'prime-agent': null,
   gemini: 'gemini-cli',
   antigravity: 'antigravity',
   aider: null,
@@ -33,6 +35,7 @@ export const SKILLS_CLI_AGENT_KEY_BY_TUI_AGENT = {
   aug: 'augment',
   cline: 'cline',
   codebuff: null,
+  freebuff: null,
   'command-code': 'command-code',
   continue: 'continue',
   cursor: 'cursor',
@@ -72,7 +75,7 @@ export const SKILLS_CLI_UNIVERSAL_AGENT_KEY = 'universal'
  * emptiness. An unknown-but-plausible key is left to the CLI, which rejects it
  * loudly with its own valid list before writing anything.
  */
-export function isSkillsCliAgentKeyShaped(value: string): boolean {
+export function isUsableSkillsCliAgentKey(value: string): boolean {
   return /^(?:\*|[a-z0-9][a-z0-9.-]*)$/i.test(value)
 }
 

@@ -1,7 +1,8 @@
+import { materializeOmpFreshConfig } from '../../shared/omp-fresh-config'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { app } from 'electron'
+import { getAppEnvironment } from '../../shared/app-environment'
 import { createHash } from 'node:crypto'
 import {
   ORCA_PI_AGENT_STATUS_EXTENSION_FILE,
@@ -37,10 +38,12 @@ type PiManagedExtensionEnv = {
   statusExtensionPath?: string
 }
 
+type LegacyOverlayAgentKind = Exclude<PiAgentKind, 'prime-agent'>
+
 // Why: old Orca versions used per-kind overlay roots. Keep the names so
 // upgrade-time cleanup can remove stale PTY-scoped Pi/OMP overlay dirs without
 // guessing which agent a terminated pane launched.
-const OVERLAY_ROOT_DIR_NAME: Record<PiAgentKind, string> = {
+const OVERLAY_ROOT_DIR_NAME: Record<LegacyOverlayAgentKind, string> = {
   pi: 'pi-agent-overlays',
   omp: 'omp-agent-overlays'
 }
@@ -52,11 +55,13 @@ const OVERLAY_ROOT_DIR_NAME: Record<PiAgentKind, string> = {
 // shadowed one in Orca's per-launch agent picker.
 const AGENT_HOME_DIR_NAME: Record<PiAgentKind, string> = {
   pi: '.pi',
-  omp: '.omp'
+  omp: '.omp',
+  'prime-agent': '.prime'
 }
 
-function getDefaultPiAgentDir(kind: PiAgentKind): string {
-  return join(homedir(), AGENT_HOME_DIR_NAME[kind], PI_AGENT_SUBDIR)
+function getDefaultPiAgentDir(kind: PiAgentKind, configDirName: string | undefined): string {
+  const root = kind === 'omp' ? configDirName || AGENT_HOME_DIR_NAME.omp : AGENT_HOME_DIR_NAME[kind]
+  return join(homedir(), root, PI_AGENT_SUBDIR)
 }
 
 function toSafeOverlayDirName(ptyId: string): string {
@@ -70,30 +75,30 @@ function withOrcaManagedExtensionMarker(source: string): string {
 }
 
 export class PiTitlebarExtensionService {
-  private getOverlayRoot(kind: PiAgentKind): string {
-    return join(app.getPath('userData'), OVERLAY_ROOT_DIR_NAME[kind])
+  private getOverlayRoot(kind: LegacyOverlayAgentKind): string {
+    return join(getAppEnvironment().getPath('userData'), OVERLAY_ROOT_DIR_NAME[kind])
   }
 
-  private getSourceOverlayDir(sourceAgentDir: string, kind: PiAgentKind): string {
+  private getSourceOverlayDir(sourceAgentDir: string, kind: LegacyOverlayAgentKind): string {
     // Why: builds before managed extensions stored Pi/OMP state in source-scoped
     // overlays. Resolve the old path so OMP upgrades can rescue stranded state.
     return join(this.getOverlayRoot(kind), toSafeOverlayDirName(`source:${sourceAgentDir}`))
   }
 
-  private getPtyOverlayDir(ptyId: string, kind: PiAgentKind): string {
+  private getPtyOverlayDir(ptyId: string, kind: LegacyOverlayAgentKind): string {
     // Why: old Orca versions used PTY-scoped hashed overlays. Keep resolving
     // that path so new spawns/teardowns can clean stale pre-migration dirs.
     return join(this.getOverlayRoot(kind), toSafeOverlayDirName(ptyId))
   }
 
-  private getLegacyOverlayDir(ptyId: string, kind: PiAgentKind): string {
+  private getLegacyOverlayDir(ptyId: string, kind: LegacyOverlayAgentKind): string {
     return join(this.getOverlayRoot(kind), ptyId)
   }
 
   // Why: overlay teardown must use the shared safeRemoveOverlay so the
   // Windows-junction guard from issue #1083 stays in lock-step across all
   // overlay consumers (Pi here, OpenCode in src/main/opencode/hook-service.ts).
-  private safeRemoveOverlay(overlayDir: string, kind: PiAgentKind): void {
+  private safeRemoveOverlay(overlayDir: string, kind: LegacyOverlayAgentKind): void {
     safeRemoveOverlay(overlayDir, this.getOverlayRoot(kind))
   }
 
@@ -119,7 +124,10 @@ export class PiTitlebarExtensionService {
   }
 
   private writeOmpFallbackStatusExtension(source: string): string | undefined {
-    const fallbackDir = join(app.getPath('userData'), OMP_MANAGED_STATUS_EXTENSION_DIR)
+    const fallbackDir = join(
+      getAppEnvironment().getPath('userData'),
+      OMP_MANAGED_STATUS_EXTENSION_DIR
+    )
     try {
       mkdirSync(fallbackDir, { recursive: true })
     } catch {
@@ -141,14 +149,16 @@ export class PiTitlebarExtensionService {
       return { sourceAgentDir }
     }
 
-    this.writeManagedExtension(
-      join(extensionsDir, ORCA_PI_EXTENSION_FILE),
-      withOrcaManagedExtensionMarker(getPiTitlebarExtensionSource())
-    )
-    this.writeManagedExtension(
-      join(extensionsDir, ORCA_PI_PREFILL_EXTENSION_FILE),
-      withOrcaManagedExtensionMarker(getPiPrefillExtensionSource(kind))
-    )
+    if (kind !== 'prime-agent') {
+      this.writeManagedExtension(
+        join(extensionsDir, ORCA_PI_EXTENSION_FILE),
+        withOrcaManagedExtensionMarker(getPiTitlebarExtensionSource(kind))
+      )
+      this.writeManagedExtension(
+        join(extensionsDir, ORCA_PI_PREFILL_EXTENSION_FILE),
+        withOrcaManagedExtensionMarker(getPiPrefillExtensionSource(kind))
+      )
+    }
     const statusExtensionPath = join(extensionsDir, ORCA_PI_AGENT_STATUS_EXTENSION_FILE)
     const statusSource = withOrcaManagedExtensionMarker(getPiAgentStatusExtensionSource(kind))
     const statusResult = this.writeManagedExtension(statusExtensionPath, statusSource)
@@ -165,19 +175,32 @@ export class PiTitlebarExtensionService {
     }
   }
 
+  buildFreshOmpEnv(): Record<string, string> {
+    return {
+      ORCA_OMP_FRESH_CONFIG: materializeOmpFreshConfig(
+        join(getAppEnvironment().getPath('userData'), OMP_MANAGED_STATUS_EXTENSION_DIR)
+      )
+    }
+  }
+
   buildPtyEnv(
     ptyId: string,
     existingAgentDir: string | undefined,
     kind: PiAgentKind,
-    options?: { materializeDefaultHome?: boolean }
+    options?: { materializeDefaultHome?: boolean; configDirName?: string }
   ): Record<string, string> {
-    const sourceAgentDir = existingAgentDir || getDefaultPiAgentDir(kind)
-    try {
-      this.safeRemoveOverlay(this.getPtyOverlayDir(ptyId, kind), kind)
-      this.safeRemoveOverlay(this.getLegacyOverlayDir(ptyId, kind), kind)
-    } catch {
-      // Why: old per-PTY overlay cleanup is best-effort; a locked stale
-      // directory should not prevent the terminal from starting.
+    const freshConfigEnv = kind === 'omp' ? this.buildFreshOmpEnv() : {}
+    // The caller resolves the effective launch environment before this point.
+    const sourceAgentDir =
+      existingAgentDir || getDefaultPiAgentDir(kind, options?.configDirName)
+    if (kind !== 'prime-agent') {
+      try {
+        this.safeRemoveOverlay(this.getPtyOverlayDir(ptyId, kind), kind)
+        this.safeRemoveOverlay(this.getLegacyOverlayDir(ptyId, kind), kind)
+      } catch {
+        // Why: old per-PTY overlay cleanup is best-effort; a locked stale
+        // directory should not prevent the terminal from starting.
+      }
     }
 
     // Why: bare shells used to mkdir ~/.<agent>/agent for every terminal so a
@@ -189,7 +212,9 @@ export class PiTitlebarExtensionService {
       if (kind === 'omp') {
         const statusSource = withOrcaManagedExtensionMarker(getPiAgentStatusExtensionSource(kind))
         const statusExtensionPath = this.writeOmpFallbackStatusExtension(statusSource)
-        return statusExtensionPath ? { ORCA_OMP_STATUS_EXTENSION: statusExtensionPath } : {}
+        return statusExtensionPath
+          ? { ...freshConfigEnv, ORCA_OMP_STATUS_EXTENSION: statusExtensionPath }
+          : freshConfigEnv
       }
       return {}
     }
@@ -199,12 +224,14 @@ export class PiTitlebarExtensionService {
     }
 
     const installed = this.installManagedExtensions(sourceAgentDir, kind)
-    const env: Record<string, string> = {}
+    const env: Record<string, string> = { ...freshConfigEnv }
     if (kind === 'omp') {
       env.ORCA_OMP_SOURCE_AGENT_DIR = installed.sourceAgentDir
       if (installed.statusExtensionPath) {
         env.ORCA_OMP_STATUS_EXTENSION = installed.statusExtensionPath
       }
+    } else if (kind === 'prime-agent') {
+      env.ORCA_PRIME_AGENT_SOURCE_AGENT_DIR = installed.sourceAgentDir
     } else {
       env.ORCA_PI_SOURCE_AGENT_DIR = installed.sourceAgentDir
     }
@@ -216,7 +243,7 @@ export class PiTitlebarExtensionService {
     // exit path discards the launch command). Sweep both old PTY-scoped
     // overlay roots for migration cleanup. Source-scoped legacy overlays are
     // deliberately left in place so upgrades never delete user runtime state.
-    for (const kind of Object.keys(OVERLAY_ROOT_DIR_NAME) as PiAgentKind[]) {
+    for (const kind of Object.keys(OVERLAY_ROOT_DIR_NAME) as LegacyOverlayAgentKind[]) {
       try {
         this.safeRemoveOverlay(this.getPtyOverlayDir(ptyId, kind), kind)
         this.safeRemoveOverlay(this.getLegacyOverlayDir(ptyId, kind), kind)

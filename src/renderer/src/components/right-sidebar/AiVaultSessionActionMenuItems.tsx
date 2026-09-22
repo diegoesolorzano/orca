@@ -4,19 +4,24 @@ import {
   FolderOpen,
   LocateFixed,
   MessageSquarePlus,
+  MessagesSquare,
   PanelTopOpen,
-  Play
+  Play,
+  Trash2
 } from 'lucide-react'
 import { DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { translate } from '@/i18n/i18n'
 
 export function SessionActionMenuItems({
   menuKind = 'dropdown',
   resumeDisabled,
   resumeLabel,
+  resumeHidden = false,
   onResume,
   onContinueInNewSession,
+  onResumeInNewChat,
   onJumpToOriginalPane,
   showJumpToWorktree,
   onJumpToWorktree,
@@ -25,13 +30,17 @@ export function SessionActionMenuItems({
   onCopyPath,
   onOpenLog,
   onRevealLog,
-  onOpenCwd
+  onOpenCwd,
+  deleteBlockedReason,
+  onDelete
 }: {
   menuKind?: 'dropdown' | 'context'
   resumeDisabled: boolean
   resumeLabel: string
+  resumeHidden?: boolean
   onResume: () => void
   onContinueInNewSession?: () => void
+  onResumeInNewChat?: () => void
   onJumpToOriginalPane?: () => void
   showJumpToWorktree: boolean
   onJumpToWorktree?: () => void
@@ -39,14 +48,31 @@ export function SessionActionMenuItems({
   // empty conversation would contradict the "not saved" state.
   onCopyResume?: () => void
   onCopyId: () => void
-  onCopyPath: () => void
+  onCopyPath?: () => void
   onOpenLog?: () => void
   onRevealLog?: () => void
   onOpenCwd?: () => void
+  // Null when Delete is offered; otherwise the tooltip explaining why it isn't.
+  deleteBlockedReason: string | null
+  onDelete: () => void
 }) {
   const Item = menuKind === 'context' ? ContextMenuItem : DropdownMenuItem
   const Separator = menuKind === 'context' ? ContextMenuSeparator : DropdownMenuSeparator
   const hasLocalPathActions = Boolean(onOpenLog || onRevealLog || onOpenCwd)
+  const deleteLabel = translate('auto.components.right.sidebar.AiVaultSessionRow.delete', 'Delete')
+  const deleteItem = (
+    <Item
+      variant="destructive"
+      disabled={Boolean(deleteBlockedReason)}
+      onSelect={deleteBlockedReason ? undefined : onDelete}
+      // Also on aria-label, so a screen-reader user hears why Delete is
+      // disabled rather than only that it is.
+      aria-label={deleteBlockedReason ? `${deleteLabel}. ${deleteBlockedReason}` : undefined}
+    >
+      <Trash2 className="size-3.5" />
+      {deleteLabel}
+    </Item>
+  )
 
   return (
     <>
@@ -68,10 +94,21 @@ export function SessionActionMenuItems({
           )}
         </Item>
       ) : null}
-      <Item disabled={resumeDisabled} onSelect={onResume}>
-        <Play className="size-3.5" />
-        {resumeLabel}
-      </Item>
+      {!resumeHidden ? (
+        <Item disabled={resumeDisabled} onSelect={onResume}>
+          <Play className="size-3.5" />
+          {resumeLabel}
+        </Item>
+      ) : null}
+      {onResumeInNewChat ? (
+        <Item onSelect={onResumeInNewChat}>
+          <MessagesSquare className="size-3.5" />
+          {translate(
+            'auto.components.right.sidebar.AiVaultSessionRow.resumeInNewChat',
+            'Resume in New Chat'
+          )}
+        </Item>
+      ) : null}
       {onContinueInNewSession ? (
         <Item onSelect={onContinueInNewSession}>
           <MessageSquarePlus className="size-3.5" />
@@ -123,9 +160,33 @@ export function SessionActionMenuItems({
           'Copy Session ID'
         )}
       </Item>
-      <Item onSelect={onCopyPath}>
-        {translate('auto.components.right.sidebar.AiVaultSessionRow.copyLogPath', 'Copy Log Path')}
-      </Item>
+      {onCopyPath ? (
+        <Item onSelect={onCopyPath}>
+          {translate(
+            'auto.components.right.sidebar.AiVaultSessionRow.copyLogPath',
+            'Copy Log Path'
+          )}
+        </Item>
+      ) : null}
+      <Separator />
+      {deleteBlockedReason ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            {/* A disabled item is pointer-events:none, so the trigger needs this
+               wrapper to receive hover (as WorktreeContextMenu does). */}
+            <div>{deleteItem}</div>
+          </TooltipTrigger>
+          <TooltipContent
+            side={menuKind === 'context' ? 'right' : 'left'}
+            sideOffset={8}
+            className="max-w-72"
+          >
+            {deleteBlockedReason}
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        deleteItem
+      )}
     </>
   )
 }
