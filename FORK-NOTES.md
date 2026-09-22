@@ -344,10 +344,41 @@ git fetch upstream
 git merge --ff-only upstream/main      # espejo limpio
 git checkout personal/build
 git merge main                          # integra upstream al build personal
-pnpm install --frozen-lockfile          # deps NUEVAS: hacerlo ANTES de correr tests
-pnpm run typecheck                      # caza los Record<TuiAgent> y switches nuevos
-npx vitest run --config config/vitest.config.ts src/main/git/   # el fix de git-crypt
-CSC_IDENTITY_AUTO_DISCOVERY=false pnpm run build:mac
+corepack pnpm install --frozen-lockfile # deps NUEVAS antes de tests. corepack: upstream fija
+                                        # pnpm@12 y el launcher local no auto-switchea (ENOEXEC)
+corepack pnpm --dir mobile install      # OBLIGATORIO desde 1.4.197: build:desktop termina en
+                                        # build:mobile-web, y mobile/ es un workspace SEPARADO
+                                        # (lockfile propio, sin node_modules tras el install raíz).
+                                        # Sin esto el build:mac falla con 425 errores de
+                                        # "Could not resolve react-native-web/expo-router/…"
+corepack pnpm run typecheck             # caza los Record<TuiAgent> y switches nuevos
+corepack pnpm run build:cli             # deja out/cli/index.js fresco (test de orchestration)
+corepack pnpm exec vitest run --config config/vitest.config.ts src/main/git/   # el fix de git-crypt
+
+# Build SOLO arm64. Desde 1.4.197 el mac target de upstream es arch: ['x64','arm64']
+# (dmg+zip de release). `build:mac` intenta empaquetar darwin/x64 y FALLA en una Mac
+# Apple Silicon: "Packaging darwin/x64 requires native variants that are not installed
+# (@parcel/watcher-darwin-x64, sherpa-onnx-darwin-x64)". No corras `install:release`
+# (baja binarios x64 que no usas). El flag `--arm64` NO basta (electron-builder igual
+# procesa la entrada x64 del target array y aborta el task). Usa el override fork-owned
+# `config/electron-builder.arm64-local.cjs` (extiende el config base y restringe el mac
+# target a arm64), replicando los env vars que pone build-mac-local.mjs:
+ID=$(node -e "import('./config/scripts/build-mac-local.mjs').then(m=>{const i=m.getLocalBuildIdentity();console.log(i.commit+'|'+i.version)})")
+COMMIT=${ID%%|*}; VERSION=${ID##*|}
+ORCA_BUILD_COMMIT=$COMMIT ORCA_LOCAL_BUILD_VERSION=$VERSION \
+  CSC_IDENTITY_AUTO_DISCOVERY=false \
+  corepack pnpm exec electron-builder --config config/electron-builder.arm64-local.cjs --mac
+# -> genera dist/mac-arm64/Orca.app (lo que usa fork-swap-app.sh)
+#
+# FIRMA: si el build dice "skipped macOS application code signing ... Orca Fork Local
+# Signing (CSSMERR_TP_NOT_TRUSTED)" y cae a adhoc, el cert perdió el trust o su clave
+# privada (find-identity -v -p codesigning ya no lo lista). El .app adhoc FUNCIONA pero
+# el cdhash cambia en cada build, así que macOS re-pide permisos TCC cada vez. Para
+# recuperar la firma estable: verificar que la clave privada siga en el llavero y
+# re-trustear (security add-trusted-cert -r trustRoot -p codeSign -k login.keychain),
+# o recrear cert+clave con los pasos openssl de "Consideraciones del build propio".
+# Ambos exigen auth de llavero (prompt GUI), así que los corre el usuario, no el agente.
+
 ./scripts/fork-swap-app.sh              # en una terminal FUERA de Orca
 ./scripts/fork-sync-provider-hooks.sh   # re-sincroniza hooks de kimi/minimax/zai
 ```
