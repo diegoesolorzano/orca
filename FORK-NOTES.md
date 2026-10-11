@@ -383,6 +383,38 @@ ORCA_BUILD_COMMIT=$COMMIT ORCA_LOCAL_BUILD_VERSION=$VERSION \
 ./scripts/fork-sync-provider-hooks.sh   # re-sincroniza hooks de kimi/minimax/zai
 ```
 
+### Merge 1.4.197 → 2026-10-11 (~2007 commits): OpenCode v2 + reubicaciones
+
+Motivo: la integración OpenCode v2 estaba a medias en 1.4.197 (opencode no salía en
+Activity, ni cargaba bien plugins como Claura). Upstream la maduró: status por pane
+(#23722, #24962), instala los hooks en la config dir de la terminal (#25296), y deja de
+cargar el plugin stale de la "retired shared hooks dir" (#23500). También `@orca/process-host`
+(#26963), structured chat sobre ACP, y muchos agentes nuevos.
+
+Solo **6 conflictos** (vs 29 el merge anterior); los parches del fork ya asientan limpio.
+Reubicaciones de este merge:
+- **Catálogo de agentes:** `agent-catalog.tsx` es barrel; las entradas se partieron en
+  `agent-catalog-entries-primary.ts` y `-secondary.ts`. minimax/zai van en **secondary**
+  (junto a kimi).
+- **Atajo redraw:** `terminal-shortcut-policy.ts` ahora usa un helper `matches(action)` en vez
+  de `keybindingMatchesAction(...)`; el bloque `terminal.redraw` del fork usa `matches('terminal.redraw')`.
+- **nested-repo:** `createLocalNestedRepoScanFilesystem` usa `isGitRepoAsync` (upstream lo hizo
+  async). En `worktree-remote.ts`, `performLocalWorktreeCreate` recibe `timing` como PARÁMETRO
+  (se quitó el `const timing` local del fork; se conservó el `nestedReposPromise`).
+  `create-worktree.ts`: se conservó el import de `showNestedReposToast` y se descartó
+  `settingsForRepoOwner` (upstream retiró su uso).
+- **Agrupado de wrappers en Activity:** `PaneForegroundAgentEntry.agent` ahora es `TerminalAgent`
+  (= `TuiAgent | 'dsb'`), así que `activity-event-builder.ts` del fork usa `TerminalAgent`, no `TuiAgent`.
+- **Nuevos `Record<TuiAgent>` que exigen minimax/zai** (el typecheck los caza): tests
+  `tui-agent-rest-signal.test.ts` (→ `'none'`, como kimi) y
+  `launched-agent-composer-readiness.test.ts` (→ `'tui-idle'`). Al agregar agentes al fork,
+  correr el typecheck y rellenar cada `Record<TuiAgent>` nuevo.
+- **Auditoría global-fetch:** upstream borró `global-fetch-call-site-audit.test.ts` (#25791,
+  "low-value test inventories"). Se aceptó el borrado; el patrón real `cancelUnreadResponseBody`
+  sigue vivo en `src/main/lib/unread-response-body.ts` y `time-tracker/client.ts` lo usa.
+- **Tooling:** pnpm subió a `12.8.1`, vitest a `5.0.3`. Mismo flujo (`corepack pnpm`, deps de
+  mobile, build arm64-only). La deuda de `max-lines` en `pane-manager.ts` (307/300) sigue igual.
+
 ### Merge 1.4.176 → 1.4.197 (3437 commits, 2026-09-22): reubicaciones y decisiones
 
 Upstream hizo refactors masivos que MOVIERON casi todos los puntos de parche. Dónde viven
