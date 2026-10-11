@@ -33,8 +33,10 @@ export function useTerminalEditorCloseFoundation(
   // Why: "running" and "could not reach the host" are different claims, and telling the user
   // processes are running when the truth is that a host went quiet is the fabricated certainty
   // docs/reference/ssh-execution-boundary.md forbids.
-  const [windowCloseDialogKind, setWindowCloseDialogKind] =
-    useState<Exclude<WindowCloseRunningWork['kind'], 'none'>>('running')
+  // Why (fork): 'quit' is a Cmd+Q with nothing running; upstream quits silently there.
+  const [windowCloseDialogKind, setWindowCloseDialogKind] = useState<
+    Exclude<WindowCloseRunningWork['kind'], 'none'> | 'quit'
+  >('running')
   const windowCloseAfterDirtyRef = useRef<{ isQuitting: boolean } | null>(null)
   // Why (fork): remember whether the open confirm dialog came from a Cmd+Q so a
   // cancel can clear main's isQuitting latch (see cancelWindowClose).
@@ -59,12 +61,12 @@ export function useTerminalEditorCloseFoundation(
     (isQuitting: boolean) => {
       void assessWindowCloseRunningWork({ isQuitting })
         .then((runningWork) => {
-          if (runningWork.kind === 'none') {
+          if (runningWork.kind === 'none' && !isQuitting) {
             confirmNativeWindowClose()
             return
           }
           windowCloseIsQuittingRef.current = isQuitting
-          setWindowCloseDialogKind(runningWork.kind)
+          setWindowCloseDialogKind(runningWork.kind === 'none' ? 'quit' : runningWork.kind)
           setWindowCloseDialogOpen(true)
         })
         // Why: the assessment must never be able to trap the window. A thrown store read is

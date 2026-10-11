@@ -81,27 +81,26 @@ export function TerminalWorkspaceDialogs({
         <DialogContent className="max-w-sm" showCloseButton={false}>
           <DialogHeader>
             <DialogTitle className="text-sm">
-              {translate('auto.components.Terminal.2fa9c69ff3', 'Close Window?')}
+              {windowCloseDialogKind === 'quit'
+                ? translate('fork.terminal.quitConfirm.title', 'Quit Orca?')
+                : translate('auto.components.Terminal.2fa9c69ff3', 'Close Window?')}
             </DialogTitle>
             <DialogDescription className="text-xs">
-              {windowCloseDialogKind === 'unverifiable'
-                ? translate(
-                    'auto.components.Terminal.b7c1f0a934',
-                    'A remote host could not be reached, so Orca cannot tell whether work is still running there. Close the window anyway?'
-                  )
-                : translate(
-                    'auto.components.Terminal.7958465754',
-                    'There are terminals with running processes. Close the window anyway?'
-                  )}
+              {windowCloseDialogKind === 'quit'
+                ? translate('fork.terminal.quitConfirm.idle', 'Are you sure you want to quit Orca?')
+                : windowCloseDialogKind === 'unverifiable'
+                  ? translate(
+                      'auto.components.Terminal.b7c1f0a934',
+                      'A remote host could not be reached, so Orca cannot tell whether work is still running there. Close the window anyway?'
+                    )
+                  : translate(
+                      'auto.components.Terminal.7958465754',
+                      'There are terminals with running processes. Close the window anyway?'
+                    )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => cancelWindowClose()}
-            >
+            <Button type="button" variant="outline" size="sm" onClick={() => cancelWindowClose()}>
               {translate('auto.components.Terminal.f82e9f02df', 'Cancel')}
             </Button>
             <Button
@@ -114,7 +113,9 @@ export function TerminalWorkspaceDialogs({
                 confirmNativeWindowClose()
               }}
             >
-              {translate('auto.components.Terminal.73768427cf', 'Close')}
+              {windowCloseDialogKind === 'quit'
+                ? translate('fork.terminal.quitConfirm.confirm', 'Quit')
+                : translate('auto.components.Terminal.73768427cf', 'Close')}
             </Button>
           </DialogFooter>
         </DialogContent>

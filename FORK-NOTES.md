@@ -450,6 +450,18 @@ ahora (para el próximo merge):
   (c) `cancelWindowClose` (llama `abortWindowClose`) en `use-terminal-editor-close-foundation.ts`,
   cableado en `TerminalWorkspaceDialogs.tsx`. `abortWindowClose` en `preload/api/ui-window-api.ts`
   (tipo) + `ui-bridge-clipboard-and-window-controls.ts` (impl) + `web-ui-api.ts` (stub).
+  (d) **Cmd+Q siempre confirma** (restaurado 2026-10-11; el merge del 2026-09-22 lo había dejado
+  fuera SIN documentarlo y un Cmd+Q accidental cerró Orca). Upstream, en un quit
+  (`isQuitting`), solo revisa terminales REMOTOS (`window-close-running-work.ts`, #524), así que
+  con terminales locales cierra sin preguntar. El fork, en `proceedToNativeWindowClose`
+  (`use-terminal-editor-close-foundation.ts`), abre el diálogo también cuando
+  `isQuitting && kind === 'none'`, con `windowCloseDialogKind = 'quit'` y la copy
+  `fork.terminal.quitConfirm.{title,idle,confirm}` en `TerminalWorkspaceDialogs.tsx`. Un cierre
+  de ventana normal sin trabajo corriendo sigue cerrando directo. Tests fork-aware en
+  `use-terminal-editor-close-foundation.window-close.test.tsx` (el de upstream "asks the
+  running-work policy…" se cambió para afirmar el diálogo, no el cierre directo).
+  Nota: con `experimentalTerminalDaemon` los PTYs sobreviven al quit (el daemon sigue vivo y
+  Orca los readjunta al relanzar), así que un Cmd+Q accidental no mata sesiones, solo cierra la UI.
 - **time-tracking:** `wireTimeTracker(store)` se llama en `startup/main-window-core-services.ts`
   (window-only, junto a registerCoreHandlers). NO en ready-foundation: rompe tests que no
   mockean ipcMain. `timeTracker.reportActivity` en `preload/api-types.ts` + `preload/index.ts`.
