@@ -36,6 +36,8 @@ const store = {
   terminalLayoutsByTabId: {},
   ptyIdsByTabId: {},
   sshConnectionStates: new Map(),
+  sshStateByEnvironment: new Map(),
+  runtimeStatusByEnvironmentId: new Map([['web-runtime', { status: { hostPlatform: 'linux' } }]]),
   transientClearedAgentStatusConnectionIds: {},
   allWorktrees: vi.fn(() => store.worktreesByRepo['repo-1']),
   createTab: mocks.createTab,
@@ -80,6 +82,7 @@ describe('launchAgentInNewTab paired web runtime', () => {
     const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')
 
     const result = launchAgentInNewTab({
+      requestId: 'request-1',
       agent: 'claude',
       worktreeId: 'wt-1',
       groupId: 'group-1'
@@ -102,7 +105,8 @@ describe('launchAgentInNewTab paired web runtime', () => {
     })
     expect(mocks.createTab).not.toHaveBeenCalled()
     await Promise.resolve()
-    expect(mocks.setActiveTabType).toHaveBeenCalledWith('terminal')
+    // Why: host creation is async, so the user may be viewing another worktree by the time it lands.
+    expect(mocks.setActiveTabType).toHaveBeenCalledExactlyOnceWith('terminal', 'wt-1')
     expect(mocks.closeTab).toHaveBeenCalledWith('stale-agent-tab', { reason: 'cleanup' })
   })
 
@@ -112,6 +116,7 @@ describe('launchAgentInNewTab paired web runtime', () => {
     const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')
 
     const result = launchAgentInNewTab({
+      requestId: 'request-2',
       agent: 'codex',
       worktreeId: 'wt-1',
       prompt: 'fix the spinner',

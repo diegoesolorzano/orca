@@ -13,7 +13,7 @@ import type { TerminalTab } from '../../../../shared/terminal-tab-types'
 import type { Worktree } from '../../../../shared/worktree/types'
 import type { ActivityEvent, ActivityLiveAgentSnapshot } from './activity-thread-types'
 import type { AgentType } from '../../../../shared/agent-status-types'
-import type { TuiAgent } from '../../../../shared/tui-agent'
+import type { TerminalAgent } from '../../../../shared/terminal-agent'
 
 // Why (fork): Claude Code wrappers (kimi/minimax/zai run `exec -a <name> claude`)
 // self-report agentType 'claude' through the hook, so Activity buckets them all
@@ -21,7 +21,7 @@ import type { TuiAgent } from '../../../../shared/tui-agent'
 // name — prefer it when the hook only knows the generic 'claude' base.
 function effectiveActivityAgentType(
   hookAgentType: AgentType | undefined,
-  foregroundAgent: TuiAgent | null | undefined
+  foregroundAgent: TerminalAgent | null | undefined
 ): AgentType {
   if (
     foregroundAgent &&
@@ -65,7 +65,7 @@ export type BuildActivityEventsArgs = {
   /** Per-pane "Clear completed" cutoffs; events stamped at or before the cutoff are hidden. */
   activityClearedAtByPaneKey?: Record<string, number>
   /** Fork: process-table foreground agent per pane, used to group Claude Code wrappers under their real name. */
-  paneForegroundAgentByPaneKey?: Record<string, { agent: TuiAgent | null }>
+  paneForegroundAgentByPaneKey?: Record<string, { agent: TerminalAgent | null }>
   now: number
 }
 
@@ -75,8 +75,10 @@ export function buildActivityEvents(
 ): {
   events: ActivityEvent[]
   liveAgentByPaneKey: Record<string, ActivityLiveAgentSnapshot>
+  paneEntryByPaneKey: Record<string, AgentStatusEntry>
 } {
   const events: ActivityEvent[] = []
+  const paneEntryByPaneKey: Record<string, AgentStatusEntry> = {}
   const seenEventIds = new Set<string>()
   const tabContext = buildActivityTabContext(args.tabsByWorktree, args.unifiedTabsByWorktree)
   const tabHostIndex = buildActivityTabHostIndex(args.unifiedTabsByWorktree)
@@ -84,9 +86,10 @@ export function buildActivityEvents(
   const liveAgentByPaneKey: Record<string, ActivityLiveAgentSnapshot> = {}
   const seenCacheKeys = cache ? new Set<string>() : null
 
-  const pushPaneEvents = (paneEvents: ActivityEvent[]): void => {
+  const pushPaneEvents = (paneEvents: ActivityEvent[], rowEntry: AgentStatusEntry): void => {
     // Why: a paneKey can appear in more than one source (live + retained overlap);
     // event ids stay globally unique so the first source wins, as before.
+    paneEntryByPaneKey[rowEntry.paneKey] ??= rowEntry
     for (const event of paneEvents) {
       if (seenEventIds.has(event.id)) {
         continue
@@ -117,7 +120,11 @@ export function buildActivityEvents(
     // Only fresh live turns contribute working activity; history cannot establish liveness.
     // The freshness check runs on the raw entry (orchestration merges never change state/timing fields).
     const liveState = freshActivityLiveAgentState(entry, args.now)
-    const { events: paneEvents, live } = resolvePaneBuild(
+    const {
+      events: paneEvents,
+      live,
+      rowEntry
+    } = resolvePaneBuild(
       {
         cacheKey: `live:${paneKey}`,
         source: entry,
@@ -141,7 +148,7 @@ export function buildActivityEvents(
     if (live) {
       liveAgentByPaneKey[paneKey] = live
     }
-    pushPaneEvents(paneEvents)
+    pushPaneEvents(paneEvents, rowEntry)
   }
 
   appendUnsupportedAndRetainedEvents({
@@ -163,5 +170,5 @@ export function buildActivityEvents(
       }
     }
   }
-  return { events: capActivityEvents(events), liveAgentByPaneKey }
+  return { events: capActivityEvents(events), liveAgentByPaneKey, paneEntryByPaneKey }
 }

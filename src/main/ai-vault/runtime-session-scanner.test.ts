@@ -116,15 +116,31 @@ describe('runtime AI Vault session scanner', () => {
     ])
   })
 
-  it('stamps accepted sessions with the requested runtime host', async () => {
-    const scanResult = await scanRuntimeAiVaultSessions('/user-data', 'env-1', {})
-
-    expect(scanResult.sessions).toEqual([
-      expect.objectContaining({
-        id: 'runtime:env-1:codex:session-1:/sessions/session-1.jsonl',
-        executionHostId: 'runtime:env-1'
-      })
-    ])
+  it('keeps full old-server replies and accepts only a marker matching the sent fingerprint', async () => {
+    const fingerprint = 'a'.repeat(64)
+    const old = await scanRuntimeAiVaultSessions('/user-data', 'env-1', {
+      afterFingerprint: fingerprint
+    })
+    expect(old.sessions).toHaveLength(1)
+    expect(old.unchanged).toBeUndefined()
+    mocks.callRuntimeEnvironment.mockResolvedValue({
+      ok: true,
+      result: {
+        sessions: [],
+        issues: [],
+        scannedAt: 'fresh',
+        fingerprint,
+        unchanged: true
+      }
+    })
+    expect(
+      await scanRuntimeAiVaultSessions('/user-data', 'env-1', { afterFingerprint: fingerprint })
+    ).toMatchObject({ fingerprint, unchanged: true, scannedAt: 'fresh' })
+    const invalid = await scanRuntimeAiVaultSessions('/user-data', 'env-1', {
+      afterFingerprint: 'b'.repeat(64)
+    })
+    expect(invalid.unchanged).toBeUndefined()
+    expect(invalid.issues[0]?.kind).toBe('host')
   })
 
   it('prepares a resume on the transcript-owning runtime', async () => {

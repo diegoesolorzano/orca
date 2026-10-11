@@ -26,6 +26,7 @@ import { useTerminalContextMenuTrigger } from './use-terminal-context-menu-trigg
 import { useAppStore } from '@/store'
 import { makePaneKey } from '../../../../shared/stable-pane-id'
 import { resolvePaneAgentSessionId } from './pane-agent-session-id'
+import { resetTerminalInputModes } from './terminal-input-mode-reset'
 
 type UseTerminalPaneContextMenuDeps = {
   managerRef: React.RefObject<PaneManager | null>
@@ -68,6 +69,7 @@ type TerminalMenuState = {
   onEqualizePaneSizes: () => void
   onClosePane: () => void
   onClearScreen: () => void
+  onResetTerminal: () => void
   onForkAgentSession: () => Promise<void>
   onContinueAgentSessionInNewSession: () => void
   onCopyAgentSessionContext: () => Promise<void>
@@ -172,8 +174,11 @@ export function useTerminalPaneContextMenu({
   const onCopyPaneId = async (): Promise<void> =>
     copyTerminalPaneMenuPaneId(resolveMenuPane(), tabId)
 
-  const onCopyTerminalId = async (): Promise<void> =>
-    copyTerminalPaneMenuTerminalId(resolveMenuPane(), tabId)
+  const onCopyTerminalId = async (): Promise<void> => {
+    const pane = resolveMenuPane()
+    const ptyId = pane ? (paneTransportsRef.current?.get(pane.id)?.getPtyId() ?? null) : null
+    return copyTerminalPaneMenuTerminalId(pane, tabId, ptyId)
+  }
 
   const onCopyAgentSessionId = async (): Promise<void> => {
     const pane = resolveMenuPane()
@@ -206,6 +211,13 @@ export function useTerminalPaneContextMenu({
     const pane = resolveMenuPane()
     if (pane) {
       onClearPaneScrollback(pane)
+    }
+  }
+
+  const onResetTerminal = (): void => {
+    const pane = resolveMenuPane()
+    if (pane) {
+      resetTerminalInputModes(paneTransportsRef.current.get(pane.id)?.getPtyId() ?? null)
     }
   }
 
@@ -295,6 +307,7 @@ export function useTerminalPaneContextMenu({
     onEqualizePaneSizes,
     onClosePane,
     onClearScreen,
+    onResetTerminal,
     onForkAgentSession,
     onContinueAgentSessionInNewSession,
     onCopyAgentSessionContext,

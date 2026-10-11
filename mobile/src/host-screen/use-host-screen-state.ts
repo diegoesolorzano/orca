@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import type { ExecutionHostId } from '../../../src/shared/execution-host'
+import type { ExecutionHostHealth } from '../../../src/shared/execution-host-health'
 import type { WorkspaceStatusDefinition } from '../../../src/shared/worktree/types'
 import { getCachedWorktrees } from '../cache/worktree-cache'
 import { createInitialHostRouteActionState } from '../host-route-action-state'
@@ -40,6 +41,12 @@ export function useHostScreenState(hostId: string | undefined, action: string | 
   const [repoColorsByName, setRepoColorsByName] = useState<Map<string, string>>(new Map())
   const [repoIconsByName, setRepoIconsByName] = useState<Map<string, MobileHostRepoIcon>>(new Map())
   const [hostName, setHostName] = useState('')
+  // The stored name identity, loaded with the name so the header can label an offline host.
+  const [hostStoredDescriptor, setHostStoredDescriptor] = useState<{
+    personalName?: string
+    lastKnownMachineName?: string
+    lastKnownHostPlatform?: NodeJS.Platform
+  } | null>(null)
   const [error, setError] = useState('')
   // An action that did not happen, said above the list rather than instead of it. Separate from
   // `error`, which is the screen's identity and is the one thing worth taking the whole view for.
@@ -65,6 +72,9 @@ export function useHostScreenState(hostId: string | undefined, action: string | 
     new Map()
   )
   const [hostLabelById, setHostLabelById] = useState<Map<ExecutionHostId, string>>(new Map())
+  const [hostHealthById, setHostHealthById] = useState<Map<ExecutionHostId, ExecutionHostHealth>>(
+    new Map()
+  )
   const [hostPlatform, setHostPlatform] = useState<NodeJS.Platform | null>(null)
   const [showSortPicker, setShowSortPicker] = useState(false)
   const [showGroupPicker, setShowGroupPicker] = useState(false)
@@ -78,6 +88,8 @@ export function useHostScreenState(hostId: string | undefined, action: string | 
   const [sleptIds, setSleptIds] = useState<Set<string>>(new Set())
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set())
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  // Desktop's "Also show pinned worktrees in their original lists"; off by default.
+  const [showPinnedInGroups, setShowPinnedInGroups] = useState(false)
   // Why: ref so the ui.get merge and ui.set writes read the latest values without re-creating callbacks on every state change.
   const viewStateRef = useRef<MobileViewState>({
     groupMode: 'repo',
@@ -105,8 +117,10 @@ export function useHostScreenState(hostId: string | undefined, action: string | 
     filters,
     groupMode,
     hostLabelById,
+    hostHealthById,
     hostName,
     hostPlatform,
+    hostStoredDescriptor,
     lastKnownWorktrees,
     newWorktreeModalRef,
     newWorktreeModalVisibleRef,
@@ -129,8 +143,10 @@ export function useHostScreenState(hostId: string | undefined, action: string | 
     setFilters,
     setGroupMode,
     setHostLabelById,
+    setHostHealthById,
     setHostName,
     setHostPlatform,
+    setHostStoredDescriptor,
     setLastKnownWorktrees,
     setOptimisticActiveWorktreeIdentity,
     setPinnedIds,
@@ -141,6 +157,7 @@ export function useHostScreenState(hostId: string | undefined, action: string | 
     setRouteActionState,
     setSearch,
     setShowFilterModal,
+    setShowPinnedInGroups,
     setShowGroupPicker,
     setShowSearch,
     setShowSortPicker,
@@ -150,6 +167,7 @@ export function useHostScreenState(hostId: string | undefined, action: string | 
     setWorktrees,
     setWorktreesLoaded,
     showFilterModal,
+    showPinnedInGroups,
     showGroupPicker,
     showSearch,
     showSortPicker,

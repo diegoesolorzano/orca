@@ -92,8 +92,14 @@
   "auto.components.GitHubItemDialog.dc1ca081a8": {
     "ko": "열림"
   },
+  "auto.components.GitHubItemDialog.e15a8b77ef": {
+    "ko": "이 검사에는 인라인 세부정보가 없습니다."
+  },
   "auto.components.GitHubItemDialog.e31651a224": {
     "ko": "실패한 체크 다시 실행"
+  },
+  "auto.components.GitHubItemDialog.e45324fbed": {
+    "ko": "검사 세부정보를 로드하지 못했습니다."
   },
   "auto.components.GitHubItemDialog.e463ec935f": {
     "ko": "체크 재실행 요청됨"
@@ -281,6 +287,9 @@
   "auto.components.PullRequestPage.6885c619e7": {
     "ko": "repos 경로가 없으면 답글을 달 수 없습니다."
   },
+  "auto.components.PullRequestPage.6b1d5ee3e4": {
+    "ko": "이 검사에는 인라인 세부정보가 없습니다."
+  },
   "auto.components.PullRequestPage.710e47aa06": {
     "ko": "PR이 다시 열렸습니다"
   },
@@ -328,6 +337,9 @@
   },
   "auto.components.PullRequestPage.ddfd42f460": {
     "ko": "agent를 시작하기 전에 프롬프트를 검토하세요."
+  },
+  "auto.components.PullRequestPage.e04c027d98": {
+    "ko": "검사 세부정보를 로드하지 못했습니다."
   },
   "auto.components.PullRequestPage.e1f3641bfd": {
     "ko": "소스 브랜치"
@@ -886,9 +898,6 @@
   },
   "auto.components.editor.IpynbViewer.3e4cbf15ea": {
     "ko": "원시"
-  },
-  "auto.components.editor.IpynbViewer.59b6cd874b": {
-    "ko": "코드"
   },
   "auto.components.editor.IpynbViewer.d6f37a640b": {
     "ko": "빈 노트북"
@@ -1787,11 +1796,17 @@
   "auto.components.right.sidebar.FileExplorerRow.3161c4e425": {
     "ko": "폴더"
   },
+  "auto.components.right.sidebar.FileExplorerRow.revealInFinder": {
+    "ko": "Finder에서 보기"
+  },
   "auto.components.right.sidebar.GitHistoryPanel.8232c8b2f2": {
     "ko": "{{value0}} commit 열기: {{value1}}"
   },
   "auto.components.right.sidebar.GitHistoryPanel.9289ba0cb9": {
     "ko": "refs란 무엇인가요?"
+  },
+  "auto.components.right.sidebar.GitHubPRStackMap.316039b5db": {
+    "ko": "검사 결과 대기 중"
   },
   "auto.components.right.sidebar.PortsPanel.0f1d8cd324": {
     "ko": "바인딩"
@@ -1921,6 +1936,9 @@
   },
   "auto.components.right.sidebar.gitlab.mr.merge.state.49ac4fec10": {
     "ko": "검사 실패"
+  },
+  "auto.components.right.sidebar.gitlab.mr.merge.state.bf628700f6": {
+    "ko": "파이프라인이 성공해야 합니다"
   },
   "auto.components.right.sidebar.index.8bc2bbc3a0": {
     "ko": "탐색기"
@@ -2344,9 +2362,6 @@
   },
   "auto.components.settings.MobileEmulatorSettingsPane.ae1612c58c": {
     "ko": "가용성"
-  },
-  "auto.components.settings.MobilePane.35100bca5d": {
-    "ko": "휴대폰에서 terminals을 사용하는 동안 Orca는 휴대폰 화면에 맞게 terminals을 축소합니다. 앱을 닫거나 다른 곳으로 전환하면 terminals이 휴대폰 크기로 유지되는지(대화형 CLI 도구가 리플로우되지 않음) 또는 데스크탑으로 다시 크기가 조정되는지 여부가 제어됩니다. 배너에서 '이 terminals 복원' 또는 '모든 terminals 복원'을 사용해 언제든지 수동으로 크기를 조정할 수 있습니다."
   },
   "auto.components.settings.MobileSettingsPane.b0088412a1": {
     "ko": "또는 다음에서 Android APK를 받으세요"
@@ -4889,12 +4904,6 @@
   "auto.components.terminal.pane.CloseTerminalDialog.stop_command_title": {
     "ko": "실행 중인 명령을 중지할까요?"
   },
-  "auto.components.terminal.pane.MobileDriverOverlay.54f7d6f69d": {
-    "ko": "모든 terminals 제어권 가져오기"
-  },
-  "auto.components.terminal.pane.MobileDriverOverlay.faa367dc74": {
-    "ko": "휴대폰이 이 화면을 휴대폰 크기로 남겨 두었습니다"
-  },
   "auto.components.terminal.pane.TerminalContextMenu.c2f0b72b8d": {
     "ko": "삽입"
   },
@@ -5012,6 +5021,9 @@
   "auto.web.WebConnect.4a4c017be1": {
     "ko": "엔드포인트:"
   },
+  "checksPanel.unlinked.description": {
+    "ko": "이 워크스페이스에서는 PR #{{number}}이(가) 숨겨져 있습니다. 검사와 리뷰 세부정보를 복원하려면 다시 연결하세요."
+  },
   "components.native-chat.approval.allow": {
     "ko": "허용"
   },
@@ -5077,5 +5089,29 @@
   },
   "dashboardPopout.terminal.close": {
     "ko": "닫기"
+  },
+  "components.native-chat.backgroundTasks.countShellCommandOne": {
+    "ko": "셸 명령 1개"
+  },
+  "components.native-chat.backgroundTasks.countShellMany": {
+    "ko": "셸 {{value0}}개"
+  },
+  "components.native-chat.backgroundTasks.countShellOne": {
+    "ko": "셸 1개"
+  },
+  "components.native-chat.backgroundTasks.groupShell": {
+    "ko": "셸"
+  },
+  "components.native-chat.backgroundTasks.stateWorking": {
+    "ko": "작업 중"
+  },
+  "components.native-chat.status.working": {
+    "ko": "작업 중…"
+  },
+  "components.native-chat.subagents.state.working": {
+    "ko": "작업 중"
+  },
+  "components.workspace.cleanup.browse.agent.working": {
+    "ko": "작업 중"
   }
 }

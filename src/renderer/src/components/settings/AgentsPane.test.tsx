@@ -8,7 +8,16 @@ import { AGENT_CATALOG } from '@/lib/agent-catalog'
 import { useAppStore } from '../../store'
 import { getAgentGeneratedTabTitlesTitle } from './agent-generated-tab-title-copy'
 import { getAgentStatusHooksTitle } from './agent-status-hooks-copy'
-import { getAgentAwakeDescription, getAgentAwakeTitle } from './agent-awake-copy'
+import {
+  getAgentWorkspaceTrustDescription,
+  getAgentWorkspaceTrustTitle
+} from './agent-workspace-trust-copy'
+import {
+  getAgentAwakeDescription,
+  getAgentAwakeLidNote,
+  getAgentAwakeTitle
+} from './agent-awake-copy'
+import { getCodexTerminalServerIsolationTitle } from './codex-terminal-server-isolation-copy'
 import { AgentAwakeSetting } from './AgentAwakeSetting'
 import { AgentRuntimeSetting } from './AgentRuntimeSetting'
 import type * as AgentRuntimeSettingModule from './AgentRuntimeSetting'
@@ -17,6 +26,7 @@ import {
   AgentPermissionsSetting,
   AgentGeneratedTabTitlesSetting,
   AgentStatusHooksSetting,
+  AgentWorkspaceTrustSetting,
   AgentsPane,
   getAgentsPaneSearchEntries,
   buildAgentAvailabilitySettingsUpdate,
@@ -24,6 +34,7 @@ import {
 } from './AgentsPane'
 import { matchesSettingsSearch } from './settings-search'
 import { TooltipProvider } from '../ui/tooltip'
+import { resolveSettingsHostScope } from './settings-host-scope'
 
 const detectedAgentsMock = vi.hoisted(() => ({
   detectedIds: ['claude'] as TuiAgent[] | null,
@@ -94,6 +105,13 @@ function renderPane(
       React.createElement(AgentsPane, {
         settings,
         updateSettings: vi.fn(),
+        // Why: mirrors the page before the user picks a host — the default host setting.
+        hostScope: resolveSettingsHostScope({
+          choice: null,
+          defaultEnvironmentId: settings.activeRuntimeEnvironmentId,
+          savedEnvironmentIds: [],
+          catalogHydrated: false
+        }),
         ...props
       })
     )
@@ -196,6 +214,15 @@ describe('AgentsPane', () => {
     }
   })
 
+  it('detects agents on the host chosen in the page, not the focused server', () => {
+    renderPane(
+      { ...getDefaultSettings('/tmp'), activeRuntimeEnvironmentId: 'env-1' },
+      { hostScope: { target: { kind: 'local' }, available: true } }
+    )
+
+    expect(detectedAgentsMock.lastTarget).toEqual({ kind: 'local' })
+  })
+
   it('shows a retryable error when initial remote detection fails', () => {
     detectedAgentsMock.detectedIds = null
     detectedAgentsMock.isLoading = false
@@ -263,6 +290,32 @@ describe('AgentsPane', () => {
     }
   })
 
+  it('keeps the host-only folder trust row out of paired web clients and their search', () => {
+    Reflect.set(globalThis, '__ORCA_WEB_CLIENT__', true)
+    try {
+      expect(renderPane(getDefaultSettings('/tmp'))).not.toContain(getAgentWorkspaceTrustTitle())
+      expect(
+        matchesSettingsSearch(
+          'trust',
+          getAgentsPaneSearchEntries({ includeAgentWorkspaceTrust: false })
+        )
+      ).toBe(false)
+    } finally {
+      Reflect.deleteProperty(globalThis, '__ORCA_WEB_CLIENT__')
+    }
+  })
+
+  it('keeps the host-only Codex server row out of paired web clients', () => {
+    Reflect.set(globalThis, '__ORCA_WEB_CLIENT__', true)
+    try {
+      expect(renderPane(getDefaultSettings('/tmp'))).not.toContain(
+        getCodexTerminalServerIsolationTitle()
+      )
+    } finally {
+      Reflect.deleteProperty(globalThis, '__ORCA_WEB_CLIENT__')
+    }
+  })
+
   it('renders the agent runtime control on Windows-class hosts', () => {
     const markup = renderPane(
       {
@@ -321,6 +374,24 @@ describe('AgentsPane', () => {
     )
   })
 
+  it('describes macOS lid behavior without promising lid-closed wake', () => {
+    expect(getAgentAwakeDescription('Macintosh')).toBe(
+      'Choose On, Agent, or Off. Agent mode prevents idle sleep while agents work, so long runs finish with the lid open. Closing the lid still puts this Mac to sleep.'
+    )
+  })
+
+  it('picks the lid note for each platform', () => {
+    expect(getAgentAwakeLidNote('Macintosh')).toBe(
+      'Prevents idle sleep with the lid open; closing the lid still puts this Mac to sleep.'
+    )
+    expect(getAgentAwakeLidNote('Windows')).toBe(
+      "Lid-close behavior follows this device's power settings."
+    )
+    expect(getAgentAwakeLidNote('X11; Linux x86_64')).toBe(
+      'Orca also asks this device to stay awake when the lid is closed, subject to its power policy.'
+    )
+  })
+
   it('updates the keep-awake mode with its legacy fallback', () => {
     const updateSettings = vi.fn()
     const element = AgentAwakeSetting({
@@ -363,6 +434,28 @@ describe('AgentsPane', () => {
     expect(updateSettings).toHaveBeenCalledWith({
       agentStatusHooksEnabled: false
     })
+  })
+
+  it('defaults agent folder trust on and toggles it off', () => {
+    const updateSettings = vi.fn()
+    const element = AgentWorkspaceTrustSetting({
+      settings: getDefaultSettings('/tmp'),
+      updateSettings
+    })
+
+    const trustSwitch = findSwitchRow(element, getAgentWorkspaceTrustTitle())
+    expect(trustSwitch.props.checked).toBe(true)
+    expect(getAgentWorkspaceTrustDescription()).toContain('hooks')
+    expect(getAgentWorkspaceTrustDescription()).toContain('already trusted stay trusted')
+    expect(getAgentWorkspaceTrustDescription()).toContain('without you watching')
+
+    const onChange: unknown = trustSwitch.props.onChange
+    expect(typeof onChange).toBe('function')
+    if (typeof onChange === 'function') {
+      onChange()
+    }
+
+    expect(updateSettings).toHaveBeenCalledWith({ agentWorkspaceTrustEnabled: false })
   })
 
   it('toggles generated tab titles with the next value', () => {

@@ -1,23 +1,9 @@
 {
+  "goldenFormatVersion": 6,
   "operation": "settings.repo-metadata",
   "family": "settings.repo-metadata",
   "namedDeltas": [],
-  "runnerVersion": 1,
-  "baseline": "bfcbc6feee10841425495fa2dafd2cbe9c12397a",
-  "lockfileSha256": "2bc53d3e8628a9bb8cbc51288065161216ea577912ab91961d8b026982774a0f",
-  "recorderSha256": "f67c2f5b753d2a4f572599f6861fae8e6e917fe89ac75b58288f8e84be609d86",
-  "adapterSha256": "fc73116d95985606fe32f22d3f14f434a6d5cd49219416c9fa0f47f971fa6ff0",
-  "scenarioSha256": "e67b645d8c4fa42e93d4cf36f45311922f7b9d9d8cc597a12f55c664d840901b",
-  "platform": "darwin",
-  "scenarioVersion": 1,
-  "projectionVersion": 2,
-  "goldenFormatVersion": 5,
   "values": {
-    "12ba3f41d4db": {
-      "name": "hostPlatform",
-      "ordinal": 14,
-      "value": "darwin"
-    },
     "19b2979d7fc2": {
       "name": "repo.list#1",
       "ordinal": 2,
@@ -58,15 +44,20 @@
         "startedAt": 0
       }
     },
+    "25b44bca9e45": {
+      "name": "hostPlatform",
+      "ordinal": 15,
+      "value": "darwin"
+    },
     "36a96ddbd396": {
       "name": "host.platform#1",
       "ordinal": 12,
       "json": "{\"id\":\"frame-4\",\"deviceToken\":\"recording-device\",\"method\":\"host.platform\"}"
     },
-    "56ab81cb67dc": {
-      "name": "hostLabelById",
+    "6063e534d9db": {
+      "name": "hostHealthById",
       "ordinal": 13,
-      "value": [["ssh:ssh-1", "SSH"]]
+      "value": []
     },
     "6338d57f282f": {
       "repoColorsByName": [
@@ -302,46 +293,13 @@
       "ordinal": 11,
       "json": "{\"id\":\"frame-3\",\"deviceToken\":\"recording-device\",\"method\":\"settings.get\"}"
     },
-    "c752e67787f9": {
-      "name": "ssh.listTargetSummaries#1",
-      "ordinal": 7,
-      "args": [
-        {
-          "name": "method",
-          "value": "ssh.listTargetSummaries"
-        },
-        {
-          "name": "params",
-          "value": {
-            "$rpc": "absent"
-          }
-        },
-        {
-          "name": "options",
-          "value": {
-            "$rpc": "absent"
-          }
-        }
-      ],
-      "settlement": {
-        "status": "fulfilled",
-        "startedAt": 0,
-        "settledAt": 0,
-        "value": {
-          "id": "frame-2",
-          "ok": true,
-          "result": {
-            "targets": [
-              {
-                "id": "ssh-1",
-                "label": "SSH"
-              }
-            ]
-          }
-        }
-      }
+    "bea13a4a2e87": {
+      "name": "hostLabelById",
+      "ordinal": 14,
+      "value": [["ssh:ssh-1", "SSH"]]
     },
-    "e62b46a04ba1": {
+    "c020f709d835": {
+      "hostHealthById": [],
       "hostLabelById": [["ssh:ssh-1", "SSH"]],
       "hostPlatform": "darwin",
       "repoColorsByName": [
@@ -384,6 +342,45 @@
         ["Emoji", "repo-2"],
         ["Avatar", "repo-3"]
       ]
+    },
+    "c752e67787f9": {
+      "name": "ssh.listTargetSummaries#1",
+      "ordinal": 7,
+      "args": [
+        {
+          "name": "method",
+          "value": "ssh.listTargetSummaries"
+        },
+        {
+          "name": "params",
+          "value": {
+            "$rpc": "absent"
+          }
+        },
+        {
+          "name": "options",
+          "value": {
+            "$rpc": "absent"
+          }
+        }
+      ],
+      "settlement": {
+        "status": "fulfilled",
+        "startedAt": 0,
+        "settledAt": 0,
+        "value": {
+          "id": "frame-2",
+          "ok": true,
+          "result": {
+            "targets": [
+              {
+                "id": "ssh-1",
+                "label": "SSH"
+              }
+            ]
+          }
+        }
+      }
     },
     "eb79a9b3682a": {
       "status": "fulfilled",
@@ -453,14 +450,15 @@
             "mount": "eb79a9b3682a",
             "load": "eb79a9b3682a"
           },
-          "state": "e62b46a04ba1",
+          "state": "c020f709d835",
           "effects": [
             "19bf6d2469a6",
             "ae27a5b525fa",
             "77cbfd1f087c",
             "6bc5e5b7a259",
-            "56ab81cb67dc",
-            "12ba3f41d4db"
+            "6063e534d9db",
+            "bea13a4a2e87",
+            "25b44bca9e45"
           ]
         }
       }

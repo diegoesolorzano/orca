@@ -1,7 +1,10 @@
 import process from 'node:process'
 import { pathToFileURL } from 'node:url'
+import { isUnitTestSupportSource } from './pr-code-change-scope.mjs'
 
-const isProductSource = (file) => !/\.test\.tsx?$/.test(file)
+const isProductSource = (file) => !/\.test\.tsx?$/.test(file) && !isUnitTestSupportSource(file)
+const isLayoutOracleSource = (file) =>
+  isProductSource(file) && !/\.spec\.ts$|-fixtures?\.ts$/.test(file)
 
 // Why config/patches: the xterm fork owns the helper textarea an input method attaches to, so a
 // patch edit can break composition without touching a file named "ime".
@@ -14,13 +17,191 @@ const NATIVE_IME_HARNESS =
 
 export const PR_E2E_SOURCE_ROUTES = [
   {
-    id: 'ssh.localhost-agent-hooks',
-    specs: ['tests/e2e/ssh-localhost.spec.ts'],
+    id: 'ssh.orcad-editor-ownership',
+    specs: ['tests/e2e/ssh-orcad-editor-ownership.spec.ts'],
     matches: (file) =>
       isProductSource(file) &&
-      /^src\/(?:relay\/(?:agent-hook|relay-agent-hook-runtime|plugin-overlay)|main\/(?:agent-hooks\/|ssh\/ssh-relay-session\.ts$)|shared\/agent-hook)/.test(
+      /^src\/renderer\/src\/runtime\/(?:web-session-existing-tab-index|web-session-tabs-sync\/(?:mirrored-editor-file-identity|tab-builders|apply-preparation-browser|state-equality-files|terminal-surfaces))\.ts$/.test(
         file
       )
+  },
+  {
+    id: 'ssh.orcad-markdown-conversion',
+    specs: ['tests/e2e/ssh-orcad-markdown-conversion.spec.ts'],
+    matches: (file) =>
+      isProductSource(file) &&
+      /^src\/renderer\/src\/components\/editor\/(?:useMarkdownDocuments|restored-editor-workspace-runtime-owner|migrate-restored-editor-file-owner)\.ts$/.test(
+        file
+      )
+  },
+  {
+    id: 'ssh.orcad-markdown-link-refresh',
+    specs: ['tests/e2e/ssh-orcad-markdown-link-refresh.spec.ts'],
+    matches: (file) =>
+      isProductSource(file) &&
+      /^src\/renderer\/src\/components\/editor\/(?:rich-markdown-doc-link|useRichMarkdownProgrammaticSync)\.ts$/.test(
+        file
+      )
+  },
+  {
+    id: 'ssh.orcad-markdown-live-documents',
+    specs: ['tests/e2e/ssh-orcad-markdown-live-documents.spec.ts'],
+    matches: (file) =>
+      isProductSource(file) &&
+      /^src\/renderer\/src\/components\/editor\/(?:useMarkdownDocuments|use-markdown-document-watch-refresh|markdown-document-list-request)\.ts$/.test(
+        file
+      )
+  },
+  {
+    id: 'ssh.orcad-explorer-watch-recovery',
+    specs: ['tests/e2e/ssh-orcad-explorer-watch-recovery.spec.ts'],
+    matches: (file) =>
+      isProductSource(file) &&
+      (file === 'src/renderer/src/components/right-sidebar/useFileExplorerWatch.ts' ||
+        file === 'src/renderer/src/hooks/worktree-file-change-event.ts')
+  },
+  {
+    id: 'ssh.orcad-editor-watch-recovery',
+    specs: ['tests/e2e/ssh-orcad-editor-watch-recovery.spec.ts'],
+    matches: (file) =>
+      isProductSource(file) &&
+      /^src\/renderer\/src\/hooks\/(?:useEditorExternalWatch|editor-runtime-file-watch)\.ts$/.test(
+        file
+      )
+  },
+  {
+    id: 'ssh.orcad-explorer-selected-host',
+    specs: ['tests/e2e/ssh-orcad-explorer-selected-host.spec.ts'],
+    matches: (file) =>
+      isProductSource(file) &&
+      (file === 'src/renderer/src/components/right-sidebar/useFileExplorerWatch.ts' ||
+        file === 'src/renderer/src/components/right-sidebar/file-explorer-operation-owner.ts' ||
+        file === 'src/renderer/src/components/right-sidebar/FileExplorer.tsx' ||
+        file === 'src/renderer/src/hooks/editor-external-watch-targets.ts' ||
+        file === 'src/renderer/src/components/right-sidebar/useFileExplorerTree.ts' ||
+        file === 'src/renderer/src/components/right-sidebar/use-file-explorer-tree-load-effects.ts')
+  },
+  {
+    id: 'serve.orcad-mode-switch',
+    specs: ['tests/e2e/orcad-serve-mode-switch.spec.ts'],
+    matches: (file) =>
+      /^tests\/e2e\/helpers\/(?:orca-serve-cli-host|headless-paired-runtime-host)\.ts$/.test(
+        file
+      ) ||
+      (isProductSource(file) &&
+        /^src\/(?:cli\/runtime\/(?:launch|serve-)|main\/orcad\/(?:main|orcad-entry|orcad-instance-lock|orcad-command-arguments|orcad-lifecycle)\.ts$|main\/startup\/desktop-profile-instance-lock\.ts$|main\/daemon\/daemon-(?:spawner|endpoint-adoption|init)|main\/server\/serve-)/.test(
+          file
+        ))
+  },
+  {
+    id: 'startup.windows-missing-appdata',
+    specs: ['tests/e2e/windows-missing-appdata-startup.spec.ts'],
+    matches: (file) =>
+      file === 'tests/e2e/helpers/orca-serve-cli-host.ts' ||
+      (isProductSource(file) &&
+        /^src\/main\/startup\/(?:windows-app-data-path|main-process-preflight)\.ts$/.test(file))
+  },
+  {
+    id: 'ssh.orcad-auto-convert',
+    specs: ['tests/e2e/ssh-orcad-auto-convert.spec.ts'],
+    matches: (file) =>
+      /^tests\/e2e\/helpers\/(?:orcad-convert-(?:flow|host)|orcad-template-variant|orcad-upgrade-profile)\.ts$/.test(
+        file
+      ) ||
+      (isProductSource(file) &&
+        /^src\/main\/(?:ipc\/ssh-host-server-|ssh\/(?:ssh-host-server-|orcad-runtime-conversion|orcad-migration-|orcad-retained-source|orcad-runtime-deployment))/.test(
+          file
+        ))
+  },
+  {
+    id: 'ssh.orcad-browser-capabilities',
+    specs: ['tests/e2e/ssh-orcad-browser-capabilities.spec.ts'],
+    matches: (file) =>
+      isProductSource(file) &&
+      /^src\/main\/(?:runtime\/(?:runtime-browser-commands-factory|orca-runtime-get-status)|host\/electron-browser-commands|orcad\/orcad-browser-)/.test(
+        file
+      )
+  },
+  {
+    id: 'browser.orcad-service-status',
+    specs: ['tests/e2e/ssh-orcad-browser-service-status.spec.ts'],
+    matches: (file) =>
+      isProductSource(file) &&
+      /^src\/renderer\/src\/components\/browser-pane\/stream-remote\/remote-browser-stream-(?:errors|status|lifecycle|restart-attempt)\.ts$/.test(
+        file
+      )
+  },
+  {
+    id: 'ssh.orcad-browser-routing',
+    specs: ['tests/e2e/ssh-orcad-browser-routing.spec.ts'],
+    matches: (file) =>
+      isProductSource(file) &&
+      /^src\/(?:main\/browser\/local-ssh-browser|main\/ipc\/browser\.ts$|renderer\/src\/(?:lib\/(?:ssh-workspace-browser-route-eligibility|worktree-host-connection-phase)|components\/browser-pane\/use-ssh-workspace-browser-route|store\/repos\/converted-ssh-browser-pages|store\/slices\/browser\/browser-tab-actions|hooks\/ipc-events\/ssh-managed-server-state-effects))/.test(
+        file
+      )
+  },
+  {
+    id: 'ssh.orcad-browser-drop-owner',
+    specs: ['tests/e2e/ssh-orcad-browser-drop-owner.spec.ts'],
+    matches: (file) =>
+      /^tests\/e2e\/helpers\/(?:orcad-convert-(?:flow|host)|orcad-upgrade-profile|docker-ssh-relay-target|browser-split-(?:guest-probes|page-server))\.ts$/.test(
+        file
+      ) ||
+      (isProductSource(file) &&
+        /^src\/renderer\/src\/(?:lib\/(?:file-preview|workspace-file-drag|worktree-runtime-owner|connection-context)\.ts|components\/(?:right-sidebar\/FileExplorer(?:Row|VirtualRows)\.tsx|browser-pane\/(?:navigate\/use-browser-page-navigation-downloads\.ts|host-guest\/attach-browser-page-webview\.ts)))$/.test(
+          file
+        ))
+  },
+  {
+    id: 'ssh.orcad-open-in-owner',
+    specs: ['tests/e2e/ssh-orcad-open-in-owner.spec.ts'],
+    matches: (file) =>
+      /^tests\/e2e\/helpers\/(?:orcad-convert-(?:flow|host)|orcad-upgrade-profile|docker-ssh-relay-target)\.ts$/.test(
+        file
+      ) ||
+      (isProductSource(file) &&
+        /^src\/renderer\/src\/(?:lib\/(?:local-path-open-guard|external-editor-open-capability|worktree-runtime-owner)\.ts|components\/(?:sidebar\/(?:WorktreeOpenInMenu|WorktreeContextMenuView)\.tsx|right-sidebar\/(?:FileExplorer(?:Toolbar)?\.tsx|source-control\/listing\/entry-context-menu\.tsx)))$/.test(
+          file
+        ))
+  },
+  {
+    id: 'ssh.orcad-terminal-root-owner',
+    specs: ['tests/e2e/ssh-orcad-terminal-root-owner.spec.ts'],
+    matches: (file) =>
+      /^tests\/e2e\/helpers\/(?:terminal-workspace-root-link|orcad-convert-(?:flow|host)|orcad-upgrade-profile|docker-ssh-relay-target)\.ts$/.test(
+        file
+      ) ||
+      (isProductSource(file) &&
+        /^src\/renderer\/src\/(?:components\/terminal-pane\/terminal-(?:worktree-path-link|file-link-actions|file-link-hit-testing|file-open-routing|link-handlers)\.ts|lib\/(?:workspace-file-host-routing|worktree-owner-route|worktree-operation-route|worktree-operation-catalog-route)\.ts)$/.test(
+          file
+        ))
+  },
+  {
+    id: 'ssh.orcad-idle-exit',
+    specs: ['tests/e2e/ssh-orcad-idle-exit.spec.ts'],
+    matches: (file) =>
+      /^tests\/e2e\/helpers\/orcad-convert-(?:flow|host)\.ts$/.test(file) ||
+      (isProductSource(file) &&
+        /^src\/(?:main\/(?:orcad\/orcad-(?:idle-|managed-idle-)|ssh\/orcad-(?:managed-serving|managed-wake|managed-tunnel|recovery-slot|remote-launch|remote-runtime-control))|shared\/orcad-idle-exit)/.test(
+          file
+        ))
+  },
+  {
+    // Why: managed SSH hosts are now the only SSH path, so these specs carry its user journeys.
+    id: 'ssh.orcad-journeys',
+    specs: [
+      'tests/e2e/ssh-orcad-terminal-journeys.spec.ts',
+      'tests/e2e/ssh-orcad-workspace-tools.spec.ts',
+      'tests/e2e/ssh-orcad-vm-provisioned-root.spec.ts'
+    ],
+    matches: (file) =>
+      /^tests\/e2e\/helpers\/(?:orcad-managed-workspace|orcad-convert-(?:flow|host)|orcad-upgrade-profile|paired-host-terminal|terminal-workspace-root-link)\.ts$/.test(
+        file
+      ) ||
+      (isProductSource(file) &&
+        /^src\/(?:main\/ssh\/orcad-managed-|main\/ipc\/ssh-port-forward|renderer\/src\/startup\/(?:ssh-startup-reconnect|startup-ssh-connection-restore)\.ts$|renderer\/src\/runtime\/(?:web-runtime-session|runtime-terminal-artifact-read\.ts$)|renderer\/src\/components\/terminal-pane\/(?:remote-runtime-|terminal-host-(?:workspace-file|file-link-existence)\.ts$))/.test(
+          file
+        ))
   },
   {
     id: 'browser-network.ssh-docker-route',
@@ -42,55 +223,6 @@ export const PR_E2E_SOURCE_ROUTES = [
     matches: (file) =>
       isProductSource(file) &&
       /^(?:config\/scripts\/(?:verify-wsl-e2e-participation|verify-playwright-participation)\.mjs$|src\/main\/(?:wsl[/-]|pty\/.*wsl|providers\/wsl)|src\/shared\/(?:wsl-|windows-terminal-shell)|src\/renderer\/src\/.*(?:terminal-paste|pty-paste)|tests\/e2e\/(?:golden-tab-bar-agent-launch\.spec|terminal-windows-shell-paste-ownership\.spec|helpers\/(?:wsl-golden-stub-agent|golden-stub-agent))|\.github\/(?:actions\/setup-wsl-test-runtime\/|workflows\/windows-wsl-e2e\.yml))/.test(
-        file
-      )
-  },
-  {
-    id: 'ephemeral-vm-runtime.rollback-readable-sidecar',
-    specs: ['tests/e2e/ephemeral-vm-provisioned-root.spec.ts'],
-    matches: (file) =>
-      /^(?:src\/main\/ephemeral-vm-(?:runtime-(?:service|provisioning-persistence)|failed-start-cleanup)|src\/shared\/(?:ephemeral-vm-runtime-(?:store|feature-store|rollback-projection|runtimes)|ephemeral-vm-recipes|orca-yaml-hook-types))\.ts$/.test(
-        file
-      )
-  },
-  {
-    id: 'ssh-terminal-source',
-    specs: [
-      'tests/e2e/pty-input-write-queue-ssh.spec.ts',
-      'tests/e2e/ssh-codex-display-artifacts-repro.spec.ts',
-      'tests/e2e/ssh-cold-activation-restore.spec.ts',
-      'tests/e2e/ssh-docker-half-open-link.spec.ts',
-      'tests/e2e/ssh-docker-reconnect-pane-restore.spec.ts',
-      'tests/e2e/ssh-docker-relay-stall-credential.spec.ts',
-      'tests/e2e/ssh-docker-resource-accumulation.spec.ts',
-      'tests/e2e/ssh-docker-transport-drop-recovery.spec.ts',
-      'tests/e2e/ssh-port-forward-lifecycle.spec.ts',
-      'tests/e2e/ssh-reconnect-tab-destruction.spec.ts',
-      'tests/e2e/ssh-startup-exec-readiness.spec.ts',
-      'tests/e2e/ssh-terminal-window-wake-stale-grid-repro.spec.ts'
-    ],
-    // Why the store/startup/shared additions: the SSH-named authorities stop at the main
-    // process and the pane component, but the reconnect ledgers and retained-payload
-    // admission that decide whether a pane rebinds live in the renderer store.
-    matches: (file) =>
-      isProductSource(file) &&
-      /^(?:src\/main\/ssh\/|src\/main\/providers\/ssh-|src\/main\/ipc\/(?:ssh-|pty)|src\/main\/runtime\/(?:public-ssh-state|ssh-file-explorer-chunk-read)\.ts|src\/relay\/|src\/shared\/(?:ssh-|skill-ssh-relay-contract)|src\/renderer\/src\/startup\/(?:ssh-startup-reconnect|startup-ssh-connection-restore)\.ts|src\/renderer\/src\/store\/slices\/(?:ssh|direct-ssh-)|src\/renderer\/src\/components\/terminal-pane\/(?:pty-|ssh-|remote-runtime-|terminal-parked-pty))/.test(
-        file
-      )
-  },
-  {
-    // Why a sibling route rather than more paths on ssh-terminal-source: these modules carry
-    // no "ssh" in their names, and only the two restore specs gate them. Folding them in
-    // would run the whole SSH terminal list for a tab-tombstone edit.
-    id: 'ssh-workspace-session-restore',
-    specs: [
-      'tests/e2e/ssh-cold-activation-restore.spec.ts',
-      'tests/e2e/ssh-reconnect-tab-destruction.spec.ts'
-    ],
-    matches: (file) =>
-      isProductSource(file) &&
-      !file.endsWith('-test-harness.ts') &&
-      /^(?:src\/main\/ipc\/remote-workspace|src\/shared\/remote-workspace-|src\/renderer\/src\/hooks\/remote-workspace-|src\/renderer\/src\/lib\/worktree-(?:initial-terminal-seeding|default-terminal-tabs)\.ts|src\/renderer\/src\/components\/terminal\/initial-terminal)/.test(
         file
       )
   },
@@ -137,7 +269,7 @@ export const PR_E2E_SOURCE_ROUTES = [
     specs: ['tests/e2e/paired-quick-open-large-tree.spec.ts'],
     matches: (file) =>
       isProductSource(file) &&
-      /^(?:src\/main\/ipc\/(?:filesystem-(?:list-files|search-file-paths)|rg-availability)\.ts|src\/main\/providers\/(?:filesystem-provider-contract|ssh-filesystem-provider(?:-capabilities)?)\.ts|src\/main\/runtime\/(?:orca-runtime-files|rpc\/methods\/files)\.ts|src\/relay\/(?:fs-handler(?:-install-rg|-list-files|-ripgrep-fallback)?|fs-list-files-fallback-chain)\.ts|src\/renderer\/src\/(?:components\/(?:QuickOpen|quick-open-file-list|quick-open-search)\.tsx?|runtime\/(?:runtime-file-client|runtime-legacy-quick-open-inventory)\.ts)|src\/shared\/(?:quick-open-(?:install-rg|path-search|transport-budget)|ripgrep-process-availability)\.ts)$/.test(
+      /^(?:src\/main\/ipc\/filesystem-(?:list-files|search-file-paths)\.ts|src\/main\/ripgrep\/bundled-ripgrep-path\.ts|src\/main\/providers\/(?:filesystem-provider-contract|ssh-filesystem-provider(?:-capabilities)?)\.ts|src\/main\/runtime\/(?:orca-runtime-files|rpc\/methods\/files)\.ts|src\/renderer\/src\/(?:components\/(?:QuickOpen|quick-open-file-list|quick-open-search)\.tsx?|runtime\/(?:runtime-file-client|runtime-legacy-quick-open-inventory)\.ts)|src\/shared\/(?:quick-open-(?:install-rg|path-search|transport-budget)|ripgrep-process-availability|bundled-ripgrep)\.ts)$/.test(
         file
       )
   },
@@ -248,6 +380,31 @@ export const PR_E2E_SOURCE_ROUTES = [
       /^src\/.*(?:[Cc]lient-?[Hh]osted|browser-host-(?:lease|page|client-page)|browser-client-(?:host|page)|runtime-browser-(?:client-)?page|session-tabs-sync|host-session-snapshot-authority|orca-runtime(?:-browser)?\.ts|\/runtime-(?:status|types)\.ts)/.test(
         file
       )
+  },
+  {
+    // Why: the oracle is the only check that reads every view of the stored layout back. Runtime
+    // matches only the modules that create, move, close, persist or publish layout, not every
+    // session or terminal file, so the orcad build and Docker SSH lane stay off unrelated work.
+    id: 'workspace-layout.oracle',
+    specs: [
+      'tests/e2e/workspace-layout-oracle-headless.spec.ts',
+      'tests/e2e/workspace-layout-oracle.spec.ts'
+    ],
+    matches: (file) =>
+      isLayoutOracleSource(file) &&
+      /^(?:src\/shared\/workspace-layout\/|src\/main\/persistence\/(?:terminal-topology\/|restoring-sessions\/|loading-store\/pty-binding-)|src\/(?:main|renderer\/src)\/runtime\/(?:[^/]+\/)*[^/]*(?:pane-admission|workspace-layout|session-tab|headless-[^/]*tab|layout-client|create-terminal|split-pty-backed-terminal|terminal-split-layout|spawn-placement)[^/]*\.ts$|tests\/e2e\/(?:helpers\/)?(?:workspace-layout-oracle|headless-layout-oracle|terminal-layout-journeys))/.test(
+        file
+      )
+  },
+  {
+    // The window's tab store reaches SSH through the same layout writers, so not the SSH lane.
+    id: 'workspace-layout.oracle-tab-store',
+    specs: [
+      'tests/e2e/workspace-layout-oracle-headless.spec.ts',
+      'tests/e2e/workspace-layout-oracle.spec.ts'
+    ],
+    matches: (file) =>
+      isLayoutOracleSource(file) && file.startsWith('src/renderer/src/store/slices/tabs')
   }
 ]
 
@@ -264,23 +421,11 @@ export function selectPrE2eSpecs(changedPaths, reportRoute = () => undefined) {
   return [...specs].sort((left, right) => left.localeCompare(right))
 }
 
-/** Routes whose authorities are SSH execution source, and so require the Docker-SSH lane. */
-export const SSH_SOURCE_ROUTE_IDS = ['ssh-terminal-source', 'ssh-workspace-session-restore']
-
-// Why derive this from the routes instead of a second path list: the Docker-SSH lane used to
-// trigger only because one route happened to list a startup-readiness spec, so pruning that
-// spec would have silently retired the lane. Two lists that must agree is how that drifted.
-export function hasSshSourceChange(changedPaths) {
-  return PR_E2E_SOURCE_ROUTES.filter((route) => SSH_SOURCE_ROUTE_IDS.includes(route.id)).some(
-    (route) => changedPaths.some(route.matches)
-  )
-}
-
 /** Routes whose authorities a real input method can judge, and so require the native IME lane. */
 export const NATIVE_IME_SOURCE_ROUTE_IDS = ['terminal-ime.native-input-method']
 
-// Why derived from the routes, like hasSshSourceChange: the native lane must trigger on IME
-// source, not on the native spec surviving in some route's spec list.
+// Why derived from the routes: the native lane must trigger on IME source, not on the native
+// spec surviving in some route's spec list.
 export function hasNativeImeSourceChange(changedPaths) {
   return PR_E2E_SOURCE_ROUTES.filter((route) =>
     NATIVE_IME_SOURCE_ROUTE_IDS.includes(route.id)
@@ -288,12 +433,9 @@ export function hasNativeImeSourceChange(changedPaths) {
 }
 
 export function shouldRunReusablePrE2e(changedPaths) {
-  // Native IME has its own workflow; SSH still runs inside the reusable workflow.
-  return (
-    hasSshSourceChange(changedPaths) ||
-    selectPrE2eSpecs(changedPaths).some(
-      (spec) => spec !== 'tests/e2e/terminal-ibus-hangul-native.spec.ts'
-    )
+  // Native IME has its own workflow.
+  return selectPrE2eSpecs(changedPaths).some(
+    (spec) => spec !== 'tests/e2e/terminal-ibus-hangul-native.spec.ts'
   )
 }
 
@@ -311,9 +453,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     input += chunk
   }
   const changedPaths = input.split(/\r?\n/).filter(Boolean)
-  if (process.argv.includes('--ssh-source')) {
-    process.stdout.write(`${hasSshSourceChange(changedPaths)}\n`)
-  } else if (process.argv.includes('--reusable-workflow')) {
+  if (process.argv.includes('--reusable-workflow')) {
     process.stdout.write(`${shouldRunReusablePrE2e(changedPaths)}\n`)
   } else if (process.argv.includes('--wsl-source')) {
     process.stdout.write(`${hasWslSourceChange(changedPaths)}\n`)

@@ -1,16 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as DeployHelpers from './ssh-relay-deploy-helpers'
 
 vi.mock('fs', () => ({
   existsSync: vi.fn(),
   readFileSync: vi.fn()
 }))
 
-vi.mock('./ssh-relay-deploy-helpers', () => ({
+vi.mock('./ssh-relay-deploy-helpers', async (importOriginal) => ({
+  ...(await importOriginal<typeof DeployHelpers>()),
   execCommand: vi.fn()
 }))
 
 vi.mock('./ssh-connection-utils', () => ({
   shellEscape: (s: string) => `'${s}'`
+}))
+
+// The previous-build pin has its own tests; here it names a build that is never a candidate.
+vi.mock('./remote-install-previous-version', () => ({
+  findPreviousRemoteInstall: vi.fn().mockResolvedValue({ state: 'ok', dirName: 'relay-0.1.0+fff' })
 }))
 
 import { existsSync, readFileSync } from 'node:fs'
@@ -23,7 +30,6 @@ import {
   gcOldRelayVersions
 } from './ssh-relay-versioned-install'
 import { acquireInstallLock } from './ssh-relay-install-lock'
-import { tryAcquireRelayRepairLock } from './ssh-relay-repair-lock'
 import {
   isRelayGcClaimed,
   relayGcClaimPath,
@@ -170,84 +176,6 @@ describe('acquireInstallLock', () => {
     const commands = mockExec.mock.calls.map(([, command]) => command)
     expect(commands[1]).toContain('lock_tombstone')
     expect(commands[4]).toBe("mkdir -p '/r'")
-  })
-
-  it('returns immediately without deleting a live repair lock', async () => {
-    // Why: repair can run npm install plus rebuild under the same lock; a
-    // second reconnect must launch degraded rather than corrupt node_modules.
-    mockExec
-      .mockResolvedValueOnce('OPEN')
-      .mockResolvedValueOnce('')
-      .mockResolvedValueOnce('BUSY')
-      .mockResolvedValueOnce('BUSY')
-      .mockResolvedValueOnce('OPEN')
-      .mockResolvedValueOnce('LOCKED')
-      .mockResolvedValueOnce('0')
-
-    await expect(tryAcquireRelayRepairLock(conn, '/r')).resolves.toBe('busy')
-
-    const commands = mockExec.mock.calls.map(([, command]) => command)
-    expect(commands.some((command) => command.includes('lock_tombstone'))).toBe(true)
-    expect(commands.filter((command) => command.startsWith('rm -rf'))).toHaveLength(0)
-  })
-
-  it('does not report stale or indeterminate contention as a launch fence', async () => {
-    mockExec
-      .mockResolvedValueOnce('OPEN')
-      .mockResolvedValueOnce('')
-      .mockResolvedValueOnce('BUSY')
-      .mockResolvedValueOnce('BUSY')
-      .mockResolvedValueOnce('OPEN')
-      .mockResolvedValueOnce('LOCKED')
-      .mockResolvedValueOnce(`${21 * 60}`)
-
-    await expect(tryAcquireRelayRepairLock(conn, '/r')).resolves.toBe('error')
-
-    mockExec.mockReset().mockRejectedValueOnce(new Error('claim probe failed'))
-    await expect(tryAcquireRelayRepairLock(conn, '/r')).resolves.toBe('error')
-  })
-
-  it('recovers a stale best-effort repair lock without polling', async () => {
-    mockExec
-      .mockResolvedValueOnce('OPEN')
-      .mockResolvedValueOnce('')
-      .mockResolvedValueOnce('BUSY')
-      .mockResolvedValueOnce('OK')
-      .mockResolvedValueOnce('OPEN')
-
-    await expect(tryAcquireRelayRepairLock(conn, '/r')).resolves.toBe('acquired')
-
-    const commands = mockExec.mock.calls.map(([, command]) => command)
-    expect(commands.some((command) => command.includes('lock_tombstone'))).toBe(true)
-    expect(commands.filter((command) => command.includes('lock_tombstone'))).toHaveLength(1)
-  })
-
-  it('backs out when GC claims the sibling path during repair lock acquisition', async () => {
-    mockExec
-      .mockResolvedValueOnce('OPEN')
-      .mockResolvedValueOnce('')
-      .mockResolvedValueOnce('OK')
-      .mockResolvedValueOnce('LOCKED')
-      .mockResolvedValueOnce('')
-
-    await expect(tryAcquireRelayRepairLock(conn, '/r')).resolves.toBe('gc')
-
-    const lastCommand = mockExec.mock.calls.at(-1)?.[1] ?? ''
-    expect(lastCommand).toBe("rm -rf '/r/.install-lock'")
-  })
-
-  it('propagates cancellation through best-effort repair lock commands', async () => {
-    const abortController = new AbortController()
-    const abortError = Object.assign(new Error('cancelled'), { name: 'AbortError' })
-    mockExec.mockRejectedValueOnce(abortError)
-
-    const promise = tryAcquireRelayRepairLock(conn, '/r', undefined, {
-      signal: abortController.signal
-    })
-    abortController.abort()
-
-    await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
-    expect(mockExec.mock.calls[0]?.[2]?.signal).toBe(abortController.signal)
   })
 
   it('polls until the lock becomes available (concurrent installer wins, then we acquire)', async () => {
@@ -909,7 +837,9 @@ describe('gcOldRelayVersions', () => {
       .mockResolvedValueOnce('OWNED')
       .mockRejectedValueOnce(unconfirmed)
 
-    await gcOldRelayVersions(conn, '/home/u', '/home/u/.orca-remote/relay-0.1.0+bbb')
+    await expect(
+      gcOldRelayVersions(conn, '/home/u', '/home/u/.orca-remote/relay-0.1.0+bbb')
+    ).rejects.toBe(unconfirmed)
 
     const releaseCommands = mockExec.mock.calls
       .map(([, command]) => command)

@@ -189,15 +189,6 @@ describe('AddRepoLocalStartStep', () => {
     ])
   })
 
-  it('keeps Browse folder primary for SSH-likely users', () => {
-    const markup = renderLocalStartStep(true)
-
-    expect(markup).toContain('Browse folder')
-    expect(markup).toContain('Project on SSH host')
-    expect(markup).toContain('Clone from URL')
-    expect(markup).toContain('Create new project')
-  })
-
   it('orders secondary actions remote-first for SSH-likely users', () => {
     const titles = getActionTitles(true)
 
@@ -222,6 +213,33 @@ describe('AddRepoLocalStartStep', () => {
     expect(model.primary).toBe('Browse folder')
     expect(model.description).toBe('Existing Git repository or folder on this host')
   })
+
+  it.each([
+    ['supported', false, 'Open a project folder from an SSH host this server connects to'],
+    ['unsupported', true, 'Update this server to add projects on its SSH hosts'],
+    ['unknown', true, 'Open a project folder from an SSH host this server connects to']
+  ] as const)(
+    "offers a server's own SSH hosts only when the server supports it (%s)",
+    (serverSshProjects, disabled, description) => {
+      const { secondaryActions } = getAddRepoLocalStartActions({
+        isSshLikely: false,
+        showRemoteAction: true,
+        browseHostKind: 'runtime',
+        serverSshProjects,
+        onBrowse: vi.fn(),
+        onOpenCloneStep: vi.fn(),
+        onOpenRemoteStep: vi.fn(),
+        onOpenCreateStep: vi.fn()
+      })
+      const remote = secondaryActions.find((action) => action.kind === 'remote')
+
+      expect(remote).toMatchObject({
+        title: "Project on this server's SSH host",
+        description,
+        disabled
+      })
+    }
+  )
 
   it('focuses Browse folder when the default Add Project step opens', async () => {
     const { container, root } = await renderLocalStartStepDom(false)

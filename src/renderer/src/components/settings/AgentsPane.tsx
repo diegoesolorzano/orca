@@ -8,12 +8,17 @@ import { useAppStore } from '@/store'
 import { AgentAwakeSetting } from './AgentAwakeSetting'
 import { AgentCacheTimerSection } from './AgentCacheTimerSection'
 import { AgentRuntimeSetting } from './AgentRuntimeSetting'
+import { CodexTerminalServerIsolationSetting } from './CodexTerminalServerIsolationSetting'
 import { buildCodexSessionSourceHomeControl } from './codex-session-source-home-control'
 import {
   getAgentGeneratedTabTitlesDescription,
   getAgentGeneratedTabTitlesTitle
 } from './agent-generated-tab-title-copy'
 import { getAgentStatusHooksDescription, getAgentStatusHooksTitle } from './agent-status-hooks-copy'
+import {
+  getAgentWorkspaceTrustDescription,
+  getAgentWorkspaceTrustTitle
+} from './agent-workspace-trust-copy'
 import {
   SettingsSegmentedControl,
   SettingsSubsectionHeader,
@@ -46,6 +51,7 @@ import {
 import { AgentAvailabilityControl, type AgentCatalogRowProps } from './AgentCatalogRow'
 import { AgentDefaultSetting } from './AgentDefaultSetting'
 import { AgentDetectionCatalog } from './AgentDetectionCatalog'
+import { getSettingsHostScopeEnvironmentId, type SettingsHostScope } from './settings-host-scope'
 
 export {
   buildAgentAvailabilitySettingsUpdate,
@@ -54,9 +60,14 @@ export {
   AgentAvailabilityControl
 }
 
-type AgentsPaneProps = {
+type AgentSettingProps = {
   settings: GlobalSettings
   updateSettings: (updates: Partial<GlobalSettings>) => void | Promise<void>
+}
+
+type AgentsPaneProps = AgentSettingProps & {
+  /** Host whose installed agents are detected; agent defaults stay desktop settings. */
+  hostScope: SettingsHostScope
   wslSupportedPlatform?: boolean
   wslAvailable?: boolean
   wslDistros?: string[]
@@ -141,12 +152,13 @@ export function AgentPermissionsSetting({
 export function AgentsPane({
   settings,
   updateSettings,
+  hostScope,
   wslSupportedPlatform,
   wslAvailable,
   wslDistros,
   wslCapabilitiesLoading
 }: AgentsPaneProps): React.JSX.Element {
-  const activeServerEnvironmentId = settings.activeRuntimeEnvironmentId?.trim() || null
+  const activeServerEnvironmentId = getSettingsHostScopeEnvironmentId(hostScope)
   const agentDetectionTarget = useMemo<AgentDetectionTarget>(
     () =>
       activeServerEnvironmentId
@@ -255,6 +267,15 @@ export function AgentsPane({
         wslCapabilitiesLoading={wslCapabilitiesLoading}
       />
       <AgentStatusHooksSetting settings={settings} updateSettings={updateSettings} />
+      {!isPairedWebClientWindow() ? (
+        <>
+          <AgentWorkspaceTrustSetting settings={settings} updateSettings={updateSettings} />
+          <CodexTerminalServerIsolationSetting
+            settings={settings}
+            updateSettings={updateSettings}
+          />
+        </>
+      ) : null}
       <AgentGeneratedTabTitlesSetting settings={settings} updateSettings={updateSettings} />
       {!isPairedWebClientWindow() ? (
         <AgentAwakeSetting settings={settings} updateSettings={updateSettings} />
@@ -281,7 +302,7 @@ export function AgentsPane({
   )
 }
 
-export function AgentStatusHooksSetting({ settings, updateSettings }: AgentsPaneProps) {
+export function AgentStatusHooksSetting({ settings, updateSettings }: AgentSettingProps) {
   const enabled = settings.agentStatusHooksEnabled !== false
   return (
     <section className="space-y-3">
@@ -296,7 +317,22 @@ export function AgentStatusHooksSetting({ settings, updateSettings }: AgentsPane
   )
 }
 
-export function AgentGeneratedTabTitlesSetting({ settings, updateSettings }: AgentsPaneProps) {
+export function AgentWorkspaceTrustSetting({ settings, updateSettings }: AgentSettingProps) {
+  const enabled = settings.agentWorkspaceTrustEnabled !== false
+  return (
+    <section className="space-y-3">
+      <SettingsSwitchRow
+        label={getAgentWorkspaceTrustTitle()}
+        description={getAgentWorkspaceTrustDescription()}
+        checked={enabled}
+        onChange={() => updateSettings({ agentWorkspaceTrustEnabled: !enabled })}
+        ariaLabel={getAgentWorkspaceTrustTitle()}
+      />
+    </section>
+  )
+}
+
+export function AgentGeneratedTabTitlesSetting({ settings, updateSettings }: AgentSettingProps) {
   const enabled = settings.tabAutoGenerateTitle === true
   return (
     <section className="space-y-3">

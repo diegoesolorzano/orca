@@ -52,6 +52,7 @@ export type SshPtyProviderMock = {
   attach: Mock
   attachForReconnect: Mock
   shutdown: Mock
+  listProcesses: Mock
   providerGeneration: number
 }
 
@@ -73,8 +74,6 @@ export type SshIpcMockState = {
   powerMonitorOnMock: Mock
   mockSshStore: SshStoreMock
   mockConnectionManager: SshConnectionManagerMock
-  mockDeployAndLaunchRelay: Mock
-  mockForceStopRelayForTarget: Mock
   mockAcceptSshPtyOutputData: Mock
   mockAcceptSshPtyOutputExit: Mock
   mockMux: SshChannelMultiplexerMock
@@ -97,10 +96,9 @@ export type SshIpcMockModules = {
   sshConfigHostPicker: SshIpcMockModule
   electron: SshIpcMockModule
   sshPtyOutputIntakeRegistry: SshIpcMockModule
+  hostServerConnect: SshIpcMockModule
   sshConnectionStore: SshIpcMockModule
   sshConnectionManager: SshIpcMockModule
-  sshRelayDeploy: SshIpcMockModule
-  sshRelayReset: SshIpcMockModule
   sshChannelMultiplexer: SshIpcMockModule
   sshPtyProvider: SshIpcMockModule
   sshFilesystemProvider: SshIpcMockModule

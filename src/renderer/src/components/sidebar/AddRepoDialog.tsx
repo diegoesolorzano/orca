@@ -108,7 +108,8 @@ export default React.memo(function AddRepoDialog({
     (repoId, executionHostId) => completeGitRepoAdd(repoId, 'ssh_remote_path', executionHostId),
     scanNestedRepos,
     showRemoteNestedRepoReview,
-    trackRemoteNestedScanResult
+    trackRemoteNestedScanResult,
+    selectedRuntimeEnvironmentId
   )
   const {
     createName,
@@ -161,6 +162,7 @@ export default React.memo(function AddRepoDialog({
     handleClone
   } = useAddRepoCloneFlow({
     step,
+    hostId: hostSelection.selectedHostId,
     activeRuntimeEnvironmentId: selectedRuntimeEnvironmentId,
     sshTargetId: hostSelection.selectedSshTargetId,
     workspaceDir: settings?.workspaceDir,
@@ -283,6 +285,7 @@ export default React.memo(function AddRepoDialog({
       isOpen={isOpen}
       step={step}
       isAdding={isAdding}
+      isCloning={isCloning}
       onBack={handleBack}
       onCloseAutoFocus={hosted?.onCloseAutoFocus}
       onOpenChange={handleOpenChange}

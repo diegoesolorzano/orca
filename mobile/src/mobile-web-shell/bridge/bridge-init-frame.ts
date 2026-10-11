@@ -8,6 +8,11 @@ import {
   type BridgeInitHost,
   type BridgeInitRoute
 } from './bridge-envelope'
+import {
+  sameSafeAreaInsets,
+  ZERO_SAFE_AREA_INSETS,
+  type BridgeSafeAreaInsets
+} from './bridge-safe-area-insets'
 
 /**
  * Every grant this app implements, which is the ceiling a session's own list is drawn from. A page
@@ -34,13 +39,15 @@ export function createBridgeInitFrame(args: {
   route: BridgeInitRoute
   /** The route patterns the page keeps for itself; everything else comes back as `navigate`. */
   pageRoutes: readonly string[]
+  /** How much of the WebView sits under a system bar, for a page that pads for them itself. */
+  safeAreaInsets?: BridgeSafeAreaInsets
+  /** The keyboard height native screens read on the shell's OS. */
+  keyboardInset?: number
   /** What each of those patterns declared, so the page can tell a hop it may keep from one it
    *  must hand back. Omitted by a shell that has none, which leaves the page on its old rule. */
   pageRouteGrants?: readonly { pathname: string; grants: readonly string[] }[]
   /** What this session may do: the protocol's own grant plus what its route declared. */
   granted: readonly string[]
-  /** What this shell takes from the page beyond the frames every shell has taken (ruling 34). */
-  accepts?: readonly string[]
   /** The host the page is showing, minus the credential the bridge already carries for it. */
   host: BridgeInitHost
   /** The allowlisted keys as the app holds them right now. */
@@ -49,6 +56,8 @@ export function createBridgeInitFrame(args: {
    *  (ruling 33.6). The page refuses its own writes to these rather than replacing the device's.
    *  Absent and empty are the same answer: nothing of the app's was left out. */
   storageOversize?: readonly string[]
+  /** The page draws the host sidebar: this session owns the whole host area on a wide layout. */
+  ownsHostArea?: boolean
 }): Extract<BridgeHostMessage, { type: 'init' }> {
   return {
     v: BRIDGE_PROTOCOL_VERSION,
@@ -66,12 +75,15 @@ export function createBridgeInitFrame(args: {
       native: [...args.granted]
     },
     route: args.route,
-    pageRoutes: [...args.pageRoutes],
-    // Omitted when empty for the reason `storageOversize` is: a shell that declares nothing and
-    // one that declares an empty list are the same answer to the page's check.
-    ...(args.accepts === undefined || args.accepts.length === 0
+    // Omitted when zero, like `storageOversize`: the page reads absent as zeros.
+    ...(args.safeAreaInsets === undefined ||
+    sameSafeAreaInsets(args.safeAreaInsets, ZERO_SAFE_AREA_INSETS)
       ? {}
-      : { accepts: [...args.accepts] }),
+      : { safeAreaInsets: { ...args.safeAreaInsets } }),
+    ...(args.keyboardInset === undefined || args.keyboardInset === 0
+      ? {}
+      : { keyboardInset: args.keyboardInset }),
+    pageRoutes: [...args.pageRoutes],
     // Copied entry by entry for the reason the grants are: nothing the shell keeps may be
     // reachable through a frame it hands out.
     ...(args.pageRouteGrants === undefined
@@ -90,6 +102,8 @@ export function createBridgeInitFrame(args: {
     // the same answer, and every golden in the corpus was recorded without it.
     ...(args.storageOversize === undefined || args.storageOversize.length === 0
       ? {}
-      : { storageOversize: [...args.storageOversize] })
+      : { storageOversize: [...args.storageOversize] }),
+    // Omitted when false, so every recorded golden stays byte-identical.
+    ...(args.ownsHostArea === true ? { ownsHostArea: true } : {})
   }
 }

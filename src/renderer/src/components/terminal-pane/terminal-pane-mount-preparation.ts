@@ -7,7 +7,10 @@ import {
   canOpenWorkspaceBrowserTabOnSsh
 } from '@/lib/workspace-browser-tab-open'
 import { resolvePaneWslDistro } from './terminal-pane-wsl-distro'
-import { resolveTerminalHttpLinkSourceOwner } from './terminal-http-link-source-owner'
+import {
+  resolveTerminalHttpLinkSourceOwner,
+  resolveTerminalRuntimeHandle
+} from './terminal-http-link-source-owner'
 import {
   getTerminalFileOpenHint,
   getTerminalUrlOpenHint,
@@ -150,7 +153,8 @@ export function prepareTerminalPaneMount(
       request: deps.requestTerminalLinkAction,
       focusTerminal: () => pane.terminal.focus(),
       plainClickBehavior,
-      middleClickBehavior
+      middleClickBehavior,
+      sourceOwner: getHttpLinkSourceOwnerForPane(paneId)
     }
   }
   const pathExistsCache = new Map<string, boolean>()
@@ -168,6 +172,7 @@ export function prepareTerminalPaneMount(
       const sourceOwner = getHttpLinkSourceOwnerForPane(paneId)
       return sourceOwner.kind === 'runtime' ? sourceOwner.runtimeEnvironmentId : null
     },
+    getRuntimeTerminalHandleForPane: (id) => resolveTerminalRuntimeHandle(paneTransports.get(id)),
     getLinkActionContext
   }
   let resizeRaf: number | null = null

@@ -13,9 +13,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/runtime/runtime-file-client', () => ({
   readRuntimeFileContent: mocks.readRuntimeFileContent
 }))
-vi.mock('@/runtime/runtime-rpc-client', () => ({
-  settingsForRuntimeOwner: () => null
-}))
+vi.mock('@/runtime/runtime-rpc-client', () => ({}))
 vi.mock('@/lib/connection-context', () => ({
   getConnectionIdForFile: mocks.getConnectionIdForFile
 }))
@@ -138,5 +136,31 @@ describe('ExternalFileChangeCompareDialog', () => {
       buttons.find((b) => b.textContent === 'Keep My Edits')?.click()
     })
     expect(onKeepEdits).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    [
+      'a floating-workspace tab as the file the user named',
+      'global-floating-terminal',
+      null,
+      'user-file'
+    ],
+    ['a project tab inside its root', 'wt-1', null, undefined]
+  ])('reads %s', async (_label, worktreeId, connectionId, kind) => {
+    mocks.getConnectionIdForFile.mockReturnValue(connectionId)
+    mocks.readRuntimeFileContent.mockResolvedValue({ content: 'disk version', isBinary: false })
+
+    await render(
+      <ExternalFileChangeCompareDialog
+        file={{ ...file, worktreeId }}
+        currentContent="buffer version"
+        open
+        onOpenChange={vi.fn()}
+        onReload={vi.fn()}
+        onKeepEdits={vi.fn()}
+      />
+    )
+
+    expect(mocks.readRuntimeFileContent.mock.calls[0]?.[0]?.access?.kind).toBe(kind)
   })
 })

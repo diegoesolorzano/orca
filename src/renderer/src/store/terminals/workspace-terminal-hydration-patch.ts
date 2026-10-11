@@ -184,7 +184,7 @@ export function targetScopedWorkspaceHydrationPatch(
       hydrated.lastVisitedAtByWorktreeId,
       workspaceKeys
     ),
-    // Why local marks win: same write-once rule as mergeDirectSshRemoteWorkspaceSession.
+    // Why local marks win: the applied mark is write-once.
     defaultTerminalTabsAppliedByWorktreeId: {
       ...replaceHydratedRecordKeys(
         state.defaultTerminalTabsAppliedByWorktreeId,
@@ -193,7 +193,7 @@ export function targetScopedWorkspaceHydrationPatch(
       ),
       ...state.defaultTerminalTabsAppliedByWorktreeId
     },
-    // Why passed through whole: hydration already unioned it with live store state, and the map is
+    // Why passed through whole: hydration already fell back to live store state, and the map is
     // keyed by tab id rather than by workspace key so replaceHydratedRecordKeys has nothing to match.
     closedTerminalTabTombstonesByTabId: hydrated.closedTerminalTabTombstonesByTabId,
     automaticAgentResumeClaimsByTabId: replaceHydratedRecordKeys(

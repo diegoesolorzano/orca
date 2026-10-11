@@ -19,6 +19,10 @@
  */
 
 import { rebuild } from '@electron/rebuild'
+import {
+  hasAdoptedSharedElectronDist,
+  resolveSharedElectronDistEntry
+} from './shared-electron-dist-cache.mjs'
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
   ensureWindowsProcessTreeCommandLinePatch,
@@ -26,6 +30,7 @@ import {
   stageWindowsProcessTreeNodeAddonApiHeaders,
   windowsProcessTreeAddonPath
 } from './windows-process-tree-gyp-rebuild.mjs'
+import { disableMsbuildFileTrackingOnWindows } from './msbuild-file-tracking.mjs'
 import {
   copyFileSync,
   existsSync,
@@ -162,6 +167,7 @@ try {
       console.warn('[rebuild] Repaired the un-applied windows-process-tree command-line patch.')
     }
   }
+  disableMsbuildFileTrackingOnWindows()
   await rebuild({
     buildPath: projectDir,
     electronVersion,
@@ -308,6 +314,16 @@ function restoreNodePtyWindowsConptyRuntime() {
 function ensureElectronPackageInstalled() {
   repairElectronPathFile()
   if (electronPackageIsUsable()) {
+    const shared = resolveSharedElectronDistEntry({
+      repoRoot: projectDir,
+      electronPackageDir,
+      version: electronVersion,
+      targetPlatform: electronInstallPlatform,
+      targetArch: electronInstallArch
+    })
+    if (shared && !hasAdoptedSharedElectronDist(shared)) {
+      runElectronPackageBinaryInstall()
+    }
     return
   }
 

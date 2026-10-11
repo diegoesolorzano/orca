@@ -3,9 +3,11 @@ import { getTabIdsAwaitingHostHydrationRemount } from '@/lib/parked-terminal-hos
 import { emitAutomationsChangedWindowEvent } from '@/lib/automations-changed-window-event'
 import { createBackgroundSleepingAgentWakeDispatcher } from '@/lib/wake-sleeping-agents-in-background'
 import { attachMobileMarkdownBridge } from '@/runtime/mobile-markdown-bridge'
+import { remoteRuntimeTerminalColorPush } from '@/runtime/remote-runtime-terminal-color-push'
 import { resetAgentHookCompletionNotificationCoordinators } from '../agent-hook-completion-notifications'
 import { useAppStore } from '../../store'
 import { registerAgentStatusIpcBridge } from './agent-status-ipc-bridge'
+import { registerBackgroundWorktreeRemovalBridge } from './background-worktree-removal-bridge'
 import { registerBrowserRequestIpcBridge } from './browser-request-ipc-bridge'
 import { registerBrowserStateIpcBridge } from './browser-state-ipc-bridge'
 import { registerContentCreationIpcBridge } from './content-creation-ipc-bridge'
@@ -17,7 +19,6 @@ import { registerOrcaProfileAuthIpcBridge } from './orca-profile-auth-ipc-bridge
 import { registerOsMarkdownFileOpenBridge } from './os-markdown-file-open-bridge'
 import { registerProjectCatalogIpcBridge } from './project-catalog-ipc-bridge'
 import { registerRateLimitIpcBridge } from './rate-limit-ipc-bridge'
-import { registerRemoteWorkspaceIpcBridge } from './remote-workspace-ipc-bridge'
 import { registerRuntimeClientIpcBridge } from './runtime-client-ipc-bridge'
 import { registerSessionTabIpcBridge } from './session-tab-ipc-bridge'
 import { registerSettingsAndSidebarIpcBridge } from './settings-sidebar-ipc-bridge'
@@ -25,6 +26,7 @@ import { registerTabLifecycleIpcBridge } from './tab-lifecycle-ipc-bridge'
 import { registerTerminalPresentationIpcBridge } from './terminal-presentation-ipc-bridge'
 import { registerPtySourceDisownedIpcBridge } from './pty-source-disowned-ipc-bridge'
 import { registerTerminalRequestIpcBridge } from './terminal-request-ipc-bridge'
+import { registerAgentLaunchTabIpcBridge } from './agent-launch-tab-ipc-bridge'
 import { registerTerminalUiRoutingIpcBridge } from './terminal-ui-routing-ipc-bridge'
 import { registerUpdaterStatusIpcBridge } from './updater-status-ipc-bridge'
 import { createWorktreeEventRuntime } from './worktree-event-runtime'
@@ -68,6 +70,7 @@ export function installAppLifetimeIpcEvents(
   if (statusApi?.onStatusChanged) {
     const apply = (snapshot: RuntimeHostStatusSnapshot): void => {
       useAppStore.getState().applyRuntimeHostStatusSnapshot(snapshot)
+      remoteRuntimeTerminalColorPush.observeStatusSnapshot(snapshot)
     }
     let stopped = false
     unsubs.push(statusApi.onStatusChanged(apply), () => {
@@ -83,6 +86,7 @@ export function installAppLifetimeIpcEvents(
       .catch((error) => console.error('Failed to read runtime status snapshots:', error))
   }
   const unsubscribeRuntimeEnvironmentStore = registerRuntimeClientIpcBridge(unsubs, worktreeRuntime)
+  registerBackgroundWorktreeRemovalBridge(unsubs)
   registerProjectCatalogIpcBridge(
     unsubs,
     worktreeRuntime.worktreeChangeRefreshQueue,
@@ -113,6 +117,7 @@ export function installAppLifetimeIpcEvents(
 
   registerTerminalPresentationIpcBridge(unsubs)
   registerTerminalRequestIpcBridge(unsubs)
+  registerAgentLaunchTabIpcBridge(unsubs)
   registerPtySourceDisownedIpcBridge(unsubs)
   registerTerminalUiRoutingIpcBridge(unsubs)
   registerSessionTabIpcBridge(unsubs)
@@ -120,11 +125,10 @@ export function installAppLifetimeIpcEvents(
   registerUpdaterStatusIpcBridge(unsubs)
   registerBrowserStateIpcBridge(unsubs, isRuntimeEnvironmentActive)
   registerContentCreationIpcBridge(unsubs, isRuntimeEnvironmentActive)
-  registerBrowserRequestIpcBridge(unsubs, isRuntimeEnvironmentActive)
+  registerBrowserRequestIpcBridge(unsubs)
   registerTabLifecycleIpcBridge(unsubs)
   registerRateLimitIpcBridge(unsubs)
   registerDirectSshStateIpcBridge(unsubs, directSshRuntime)
-  registerRemoteWorkspaceIpcBridge(unsubs, directSshRuntime)
   registerZoomIpcBridge(unsubs)
   const agentStatusBridge = registerAgentStatusIpcBridge(unsubs)
   const disposeMobileDriverHydration = registerMobileDriverIpcBridge(

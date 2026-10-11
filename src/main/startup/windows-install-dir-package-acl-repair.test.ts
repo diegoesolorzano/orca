@@ -1,8 +1,9 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ProcessResult, ProcessSpec } from '../../shared/child-process/run-process'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
+
+import type { ProcessResult, ProcessSpec } from '@orca/process-host/process-spec'
 import type { CrashReportBreadcrumbData } from '../../shared/crash-reporting'
 import {
   buildInstallDirAclRepairCommands,
@@ -45,7 +46,9 @@ function fakeRunner(reply: (spec: ProcessSpec) => Partial<ProcessResult> = () =>
 }
 
 function userDataDir(): string {
-  return mkdtempSync(join(tmpdir(), 'orca-acl-repair-'))
+  const path = mkdtempSync(join(tmpdir(), 'orca-acl-repair-'))
+  onTestFinished(() => rmSync(path, { recursive: true, force: true }))
+  return path
 }
 
 function repair(
@@ -312,8 +315,7 @@ describe('isInstallDirAclPoisonVerdict', () => {
     expect(
       isInstallDirAclPoisonVerdict({
         status: 'ok',
-        matchesPoisonSignature: true,
-        wellKnownNameCheckReliable: true
+        matchesPoisonSignature: true
       })
     ).toBe(true)
     expect(
@@ -323,17 +325,5 @@ describe('isInstallDirAclPoisonVerdict', () => {
       })
     ).toBe(false)
     expect(isInstallDirAclPoisonVerdict({ status: 'failed', reason: 'unreadable' })).toBe(false)
-  })
-
-  // A localized icacls hides the well-known grants behind translated names, so the
-  // signature there is unproven: repairing and blaming the install would be wrong.
-  it('refuses a signature the probe could not name-check', () => {
-    expect(
-      isInstallDirAclPoisonVerdict({
-        status: 'ok',
-        matchesPoisonSignature: true,
-        wellKnownNameCheckReliable: false
-      })
-    ).toBe(false)
   })
 })

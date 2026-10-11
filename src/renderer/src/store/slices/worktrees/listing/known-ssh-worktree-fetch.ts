@@ -19,7 +19,6 @@ import {
   worktreeHostMatchOptions,
   worktreeMatchesHost
 } from './worktree-host-ownership'
-import { settingsForRepoOwner } from './worktree-owner-settings'
 import { getCurrentDirectSshAuthority } from './direct-ssh-authority'
 import {
   acquireDetectedWorktreeRefreshLeaseForRepo,
@@ -210,17 +209,12 @@ export function acquireDirectSshDetectedWorktreeRefresh(
     request.repoId,
     request.executionHostId
   )
-  const settings = settingsForRepoOwner(
-    requestStartedState,
-    request.repoId,
-    request.executionHostId
-  )
   const options: DetectedWorktreeRefreshOptions = {
     executionHostId: request.executionHostId,
     directSshAuthority: request.authority,
     requireAuthoritative: request.requireAuthoritative
   }
-  const lease = acquireDetectedWorktreeRefreshLeaseForRepo(settings, request.repoId, options)
+  const lease = acquireDetectedWorktreeRefreshLeaseForRepo(request.repoId, options)
   let mergedResult: HostQualifiedDetectedWorktreeResult | undefined
 
   return {
@@ -258,7 +252,7 @@ export function acquireDirectSshDetectedWorktreeRefresh(
         executionHostId: request.executionHostId,
         directSshAuthority: request.authority
       }
-      const admitted = mergeFetchedWorktrees(
+      const outcome = mergeFetchedWorktrees(
         store.setState as Parameters<StateCreator<AppState, [], [], WorktreeSlice>>[0],
         {
           repoId: request.repoId,
@@ -269,9 +263,17 @@ export function acquireDirectSshDetectedWorktreeRefresh(
           refresh
         }
       )
-      mergedResult = admitted
-        ? providerResult
-        : (staleDetectedWorktreeProviderResult(refresh) ?? providerResult)
+      // Why 'superseded' is current: a newer catalog is already applied for this host. 'stale' would
+      // end a reconnect preparation, and nothing retries it while the connection holds.
+      switch (outcome) {
+        case 'applied':
+        case 'superseded':
+          mergedResult = providerResult
+          break
+        case 'not-current':
+          mergedResult = staleDetectedWorktreeProviderResult(refresh) ?? providerResult
+          break
+      }
       return mergedResult
     }
   }
