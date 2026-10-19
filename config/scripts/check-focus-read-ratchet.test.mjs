@@ -3,13 +3,9 @@ import { describe, expect, it } from 'vitest'
 import {
   countFocusSettingReads,
   countForbiddenHelperUses,
-  diffCounts,
   discoverFocusReaders,
-  formatBaseline,
   hasFocusRoutingAlias,
-  isScannedPath,
-  parseBaseline,
-  parseBaselineNotes
+  isScannedPath
 } from './check-focus-read-ratchet.mjs'
 
 describe('countForbiddenHelperUses', () => {
@@ -99,7 +95,7 @@ describe('countFocusSettingReads', () => {
     expect(readers.namesFor('src/renderer/src/b.ts').has('ownerTarget')).toBe(false)
     expect(
       countFocusSettingReads(
-        'const t = runtimeTargetForOwnerHostId(getSettingsFocusedExecutionHostId(s))',
+        'const t = ipcOrRuntimeTargetForHostId(getSettingsFocusedExecutionHostId(s))',
         readers.namesFor('src/renderer/src/a.ts')
       )
     ).toBe(1)
@@ -197,8 +193,55 @@ describe('countFocusSettingReads', () => {
     expect(readers.namesFor('src/renderer/src/hook.ts').has('sideEffectOnly')).toBe(false)
   })
 
+  it('stops an arrow result before the next argument without losing nested reader results', () => {
+    const readers = discoverFocusReaders(
+      new Map([
+        [
+          'src/renderer/src/focus.ts',
+          'export function focusedId(s) {\n  return s.activeRuntimeEnvironmentId\n}\n'
+        ],
+        [
+          'src/renderer/src/hook.ts',
+          [
+            "import { focusedId } from './focus'",
+            'export function useCloseActions(s) {',
+            '  const closeTabs = () => { focusedId(s) }',
+            '  const closeOthers = () => {',
+            '    confirmClose(() => selectIds(s), closeTabs)',
+            '  }',
+            '  return { closeOthers }',
+            '}',
+            'export const wrappedReader = (s) => forward(null, focusedId(s))',
+            'export const commaReader = (s) => (null, focusedId(s))'
+          ].join('\n')
+        ]
+      ])
+    )
+    const names = readers.namesFor('src/renderer/src/hook.ts')
+    expect(names.has('useCloseActions')).toBe(false)
+    expect(names.has('wrappedReader')).toBe(true)
+    expect(names.has('commaReader')).toBe(true)
+  })
+
   it('counts the default scope source as a read', () => {
     expect(countFocusSettingReads('linearConnect(defaultScopeSource(get().settings), key)')).toBe(1)
+  })
+
+  it('counts the legacy-fallback owner adapter and a wrapper that returns its result', () => {
+    const readers = discoverFocusReaders(
+      new Map([
+        [
+          'src/renderer/src/owner.ts',
+          [
+            'export function envUnlessTwin(state, id) {',
+            '  const match = resolveOwnerWithLegacyFallback(state, { workspaceId: id })',
+            "  return match.kind === 'resolved' ? match.owner : null",
+            '}'
+          ].join('\n')
+        ]
+      ])
+    )
+    expect(readers.has('envUnlessTwin')).toBe(true)
   })
 
   it('counts destructuring reads', () => {
@@ -245,55 +288,6 @@ describe('isScannedPath', () => {
     expect(isScannedPath('src/renderer/src/a.tsx')).toBe(true)
     expect(isScannedPath('src/renderer/src/a.test.ts')).toBe(false)
     expect(isScannedPath('src/renderer/src/a.spec.tsx')).toBe(false)
-  })
-})
-
-describe('baseline', () => {
-  it('round-trips through format and parse, dropping zero rows', () => {
-    const counts = new Map([
-      ['src/b.ts', 2],
-      ['src/a.ts', 1],
-      ['src/c.ts', 0]
-    ])
-    expect(parseBaseline(formatBaseline(counts))).toEqual(
-      new Map([
-        ['src/a.ts', 1],
-        ['src/b.ts', 2]
-      ])
-    )
-  })
-
-  it('keeps a row note through a prune', () => {
-    const text = formatBaseline(
-      new Map([['src/a.ts', 1]]),
-      ['# header'],
-      new Map([['src/a.ts', 'waits for V4b']])
-    )
-    expect(text).toBe('# header\n1 src/a.ts # waits for V4b\n')
-    expect(parseBaseline(text)).toEqual(new Map([['src/a.ts', 1]]))
-    expect(parseBaselineNotes(text)).toEqual(new Map([['src/a.ts', 'waits for V4b']]))
-  })
-
-  it('fails growth, including a new file, and asks to prune shrinkage', () => {
-    const { grown, shrunk } = diffCounts(
-      new Map([
-        ['src/a.ts', 3],
-        ['src/new.ts', 1],
-        ['src/b.ts', 1]
-      ]),
-      new Map([
-        ['src/a.ts', 2],
-        ['src/b.ts', 2],
-        ['src/gone.ts', 1]
-      ])
-    )
-    expect(grown).toEqual([
-      { file: 'src/a.ts', now: 3, allowed: 2 },
-      { file: 'src/new.ts', now: 1, allowed: 0 }
-    ])
-    expect(shrunk).toEqual([
-      { file: 'src/b.ts', now: 1, allowed: 2 },
-      { file: 'src/gone.ts', now: 0, allowed: 1 }
-    ])
+    expect(isScannedPath('src/renderer/src/a.test-fixture.ts')).toBe(false)
   })
 })

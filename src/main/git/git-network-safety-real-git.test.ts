@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runProcess } from '@orca/process-host'
-import { quotePosixShell } from '../../shared/wsl-login-shell-command'
+import { quotePosixShell } from '../../shared/shell-argument-quoting'
 import { gitExecFileAsync, gitSpawnAfterWindowsEnvironmentReady } from './runner'
 
 let root = ''
@@ -72,7 +72,6 @@ async function expectIdentity(identity: string): Promise<void> {
 }
 
 describe('network SSH configuration with real Git', () => {
-
   it('preserves command-line SSH configuration ahead of repository configuration', async () => {
     await git(['config', 'core.sshCommand', sshCommand('repository')])
     await expect(

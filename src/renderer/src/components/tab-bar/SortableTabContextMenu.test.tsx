@@ -77,17 +77,17 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('./TabSessionSurfaceSwitchMenuItems', () => ({
   TabSessionSurfaceSwitchMenuItems: ({
     tab,
-    structuredSessionId,
+    nativeChat,
     leadingSeparator
   }: {
     tab: { id: string }
-    structuredSessionId?: string
+    nativeChat?: { sessionId: string }
     leadingSeparator: boolean
   }) => (
     <div
       data-testid="session-surface-switch"
       data-tab-id={tab.id}
-      data-structured-session-id={structuredSessionId ?? ''}
+      data-structured-session-id={nativeChat?.sessionId ?? ''}
       data-leading-separator={String(leadingSeparator)}
     />
   )
@@ -116,16 +116,7 @@ function renderMenu(overrides: Partial<ComponentProps<typeof SortableTabContextM
   act(() => {
     root.render(
       <SortableTabContextMenu
-        tab={{
-          id: 'term-1',
-          ptyId: null,
-          worktreeId: 'wt-1',
-          title: 'bash',
-          customTitle: null,
-          color: null,
-          sortOrder: 0,
-          createdAt: 0
-        }}
+        tab={{ id: 'term-1', worktreeId: 'wt-1', color: null }}
         unifiedTabId="tab-1"
         groupId="group-1"
         isActive
@@ -301,7 +292,7 @@ describe('SortableTabContextMenu', () => {
   })
 
   it('offers the session-history chat/CLI move right above Pin Tab', () => {
-    const { container } = renderMenu({ structuredSessionId: 'orca-chat-1' })
+    const { container } = renderMenu({ nativeChat: { sessionId: 'orca-chat-1', agent: 'codex' } })
     const marker = getSurfaceSwitchMarker(container)
 
     expect(marker.getAttribute('data-tab-id')).toBe('term-1')
@@ -368,10 +359,10 @@ describe('SortableTabContextMenu', () => {
     act(() => getButton(container, 'Close Others').click())
     expect(onCloseOthers).toHaveBeenCalledWith('term-1')
 
-    act(() => getButton(container, 'Close Tabs To The Right').click())
+    act(() => getButton(container, 'Close All Tabs To The Right').click())
     expect(onCloseToRight).toHaveBeenCalledWith('term-1')
 
-    act(() => getButton(container, 'Close Tabs To The Left').click())
+    act(() => getButton(container, 'Close All Tabs To The Left').click())
     expect(onCloseToLeft).toHaveBeenCalledWith('term-1')
   })
 
@@ -381,8 +372,8 @@ describe('SortableTabContextMenu', () => {
       hasTabsToRight: false
     })
 
-    expect(getButton(container, 'Close Tabs To The Left').disabled).toBe(true)
-    expect(getButton(container, 'Close Tabs To The Right').disabled).toBe(true)
+    expect(getButton(container, 'Close All Tabs To The Left').disabled).toBe(true)
+    expect(getButton(container, 'Close All Tabs To The Right').disabled).toBe(true)
   })
 
   it('hides move-tab split actions for a single-tab group', () => {
@@ -403,5 +394,14 @@ describe('SortableTabContextMenu', () => {
 
     expect(container.textContent).not.toContain('Move Tab to Split')
     expect(container.textContent).toContain('Split terminal right')
+  })
+
+  it('offers Close split pane only when the group is one of several splits', () => {
+    const onCloseSplitPane = vi.fn()
+    const { container } = renderMenu({ onCloseSplitPane })
+    act(() => getButton(container, 'Close split pane').click())
+    expect(onCloseSplitPane).toHaveBeenCalledOnce()
+
+    expect(renderMenu().container.textContent).not.toContain('Close split pane')
   })
 })

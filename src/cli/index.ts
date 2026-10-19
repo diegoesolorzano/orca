@@ -14,17 +14,13 @@ import {
   assertEnvironmentSelectorResolvable,
   resolveHostFlagEnvironmentId
 } from './execution-host-flag'
-import { listSshTargets } from './host-selector-alternatives'
+import { fetchSshTargetSummaries, listSshTargets } from './host-selector-alternatives'
 import { reportCliError } from './cli-error'
 import { printHelp } from './help'
 import type { RuntimeClient } from './runtime-client'
 import { COMMAND_SPECS } from './specs'
 import { resolveOrchestrationCliExecutable } from './runtime/orchestration-recovery-command'
 import { refuseConflictingSessionCallerFlags } from './session-caller-flags'
-import {
-  refuseOwnerOnlySshBridgeCommand,
-  refuseSshBridgeEnvironmentRouting
-} from './ssh-bridge-command-policy'
 
 export { COMMAND_SPECS } from './specs'
 export { buildCurrentWorktreeSelector, normalizeWorktreeSelector } from './selectors'
@@ -41,7 +37,7 @@ function shouldIgnoreRemoteSelection(commandPath: string[]): boolean {
     // so routing the other half produced one listing describing two machines at once.
     commandPath.join(' ') === 'host list' ||
     commandPath[0] === 'serve' ||
-    commandPath[0] === 'agent' ||
+    (commandPath[0] === 'agent' && commandPath[1] !== 'launch') ||
     commandPath[0] === 'vm' ||
     commandPath[0] === 'agent-context' ||
     commandPath[0] === 'profile'
@@ -117,8 +113,6 @@ export async function main(
     // simple command typos or unsupported flags.
     validateCommandAndFlags(COMMAND_SPECS, parsed)
     const commandSpec = findCommandSpec(COMMAND_SPECS, parsed.commandPath)
-    // Why: the canonical path, so an alias cannot slip an owner-only command past the bridge.
-    refuseOwnerOnlySshBridgeCommand(commandSpec?.path ?? parsed.commandPath, parsed.flags)
     refuseConflictingSessionCallerFlags(commandSpec, parsed.flags)
     const RuntimeClientClass = await loadRuntimeClientClass()
     const ignoreRemoteSelection = shouldIgnoreRemoteSelection(parsed.commandPath)
@@ -145,6 +139,12 @@ export async function main(
           // Why: only consulted when the name missed, and against this machine's own runtime —
           // SSH targets are registered there, not in the paired server we failed to find.
           listSshTargets: listSshTargetsForSuggestion,
+          verifySshTargets: async () =>
+            (
+              await fetchSshTargetSummaries<{ id: string; label: string }>(
+                new RuntimeClientClass(undefined, undefined, null, null)
+              )
+            ).targets,
           pairingCode: typeof pairingCode === 'string' ? pairingCode : null,
           environmentSelector:
             typeof environmentSelector === 'string'
@@ -156,7 +156,6 @@ export async function main(
     // Why: --host runtime:<name> is canonicalized to the environment's id so downstream host-id
     // comparisons against stored rows still match; rewrite the flag once, here, rather than
     // resolving the name again at every consumer.
-    refuseSshBridgeEnvironmentRouting(hostEnvironmentId)
     if (hostEnvironmentId !== null) {
       parsed.flags.set('host', `runtime:${hostEnvironmentId}`)
     }
@@ -187,13 +186,20 @@ export async function main(
         return client
       },
       cwd,
-      json
+      json,
+      rawArgs: argv
     })
   } catch (error) {
     const worktreeSelector = parsed.flags.get('worktree')
+    const hostFlag = parsed.flags.get('host')
     reportCliError(error, json, {
       commandPath: parsed.commandPath,
-      ...(typeof worktreeSelector === 'string' ? { worktreeSelector } : {})
+      ...(typeof worktreeSelector === 'string' ? { worktreeSelector } : {}),
+      remoteServerSelected:
+        parsed.flags.has('environment') ||
+        parsed.flags.has('pairing-code') ||
+        (typeof hostFlag === 'string' && hostFlag.startsWith('runtime:')) ||
+        Boolean(process.env.ORCA_ENVIRONMENT?.trim() || process.env.ORCA_PAIRING_CODE?.trim())
     })
     process.exitCode = 1
   }
@@ -201,7 +207,6 @@ export async function main(
 
 async function runClaudeTeams(argv: string[], cwd: string): Promise<void> {
   try {
-    refuseOwnerOnlySshBridgeCommand(['claude-teams'], new Map())
     // Why: everything after `orca claude-teams` belongs to Claude Code, not
     // Orca's own flag parser, so new Claude flags work without Orca changes.
     const client = new (await loadRuntimeClientClass())(undefined, undefined, null, null)

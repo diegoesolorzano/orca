@@ -29,7 +29,7 @@ it.each([
   'tsconfig.json',
   'config/tsconfig.web.json',
   '.npmrc',
-  '.pnpmfile.cjs',
+  'config/pnpmfile.cjs',
   '.github/workflows/pr.yml',
   '.github/actions/install-node-dependencies/action.yml'
 ])('retains extraction when an input changes: %s', (path) => {
@@ -110,7 +110,7 @@ it('preserves deleted and renamed inputs and falls back to extraction on detecti
   expect(step.run).toContain('git diff --name-only --no-renames -z "$DIFF_BASE" HEAD')
   expect(step.run).not.toContain('--diff-filter')
   expect(step.run).toContain('&& [ "$scope" = false ]; then')
-  expect(step.run).toMatch(/else\s+pnpm run verify:localization-extraction\s+fi/)
+  expect(step.run).toMatch(/else\s+bun config\/scripts\/verify-localization-extraction\.mjs\s+fi/)
   expect(
     affectsLocalizationExtraction(['src/old-translations.ts', 'docs/moved-translations.ts'])
   ).toBe(true)
