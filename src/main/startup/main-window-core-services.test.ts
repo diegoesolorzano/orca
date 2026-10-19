@@ -54,6 +54,8 @@ vi.mock('../window/attach-main-window-services', () => ({
   attachMainWindowServices: attachMainWindowServicesMock
 }))
 vi.mock('../macos-tcc-prompt-notice', () => ({ initTccPromptNotice: initTccPromptNoticeMock }))
+// Why (fork): the time tracker registers ipcMain listeners this test's electron does not provide.
+vi.mock('../time-tracker/wire', () => ({ wireTimeTracker: vi.fn() }))
 vi.mock('../updater', () => ({ resolveUpdateInstallMode: vi.fn(() => 'interactive') }))
 vi.mock('./main-process-state', () => ({ mainProcessState: state }))
 vi.mock('../agent-auth-restart-preservation', () => ({

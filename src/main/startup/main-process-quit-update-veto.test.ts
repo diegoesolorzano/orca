@@ -80,12 +80,14 @@ it('keeps startup services live when the updater has vetoed before-quit', async 
 
   app.emit('before-quit', { defaultPrevented: false })
 
+  // Why (fork): an allowed before-quit only latches isQuitting; teardown waits for will-quit so a
+  // Cmd+Q cancelled in the confirm dialog leaves these services running.
   expect(state.isQuitting).toBe(true)
-  expect(fenceAndCloseNow).toHaveBeenCalledOnce()
-  expect(setMobileRelayPairingProvider).toHaveBeenCalledWith(null)
-  expect(unsubscribeAgentAwakeStatusChanges).toHaveBeenCalledOnce()
-  expect(dispose).toHaveBeenCalledOnce()
-  expect(stop).toHaveBeenCalledOnce()
+  expect(fenceAndCloseNow).not.toHaveBeenCalled()
+  expect(setMobileRelayPairingProvider).not.toHaveBeenCalled()
+  expect(unsubscribeAgentAwakeStatusChanges).not.toHaveBeenCalled()
+  expect(dispose).not.toHaveBeenCalled()
+  expect(stop).not.toHaveBeenCalled()
   for (const listener of process.listeners('exit')) {
     if (!exitListenersBefore.includes(listener)) {
       process.removeListener('exit', listener)
