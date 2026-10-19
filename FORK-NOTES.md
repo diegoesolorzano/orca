@@ -389,6 +389,25 @@ corepack pnpm run build:desktop \
 ./scripts/fork-sync-provider-hooks.sh   # re-sincroniza hooks de kimi/minimax/zai
 ```
 
+### Merge 2026-10-11 → 2026-10-19 (1470 commits): 3 conflictos
+
+La versión de upstream sigue en 1.4.214. Conflictos y reubicaciones:
+- **Updater:** el guard `FORK_SELF_UPDATE_DISABLED` lo movió git solo, siguiendo a upstream:
+  `autoInstallOnAppQuit` está ahora en `src/main/updater/updater-setup.ts` y los IPC
+  `updater:download`/`quitAndInstall` en `src/main/window/main-window-updater.ts`.
+- **`worktree-remote.ts`:** upstream agregó `provisionedByHost` (automations) y
+  `notifyLineageRepos`. Se conservó el `nestedReposPromise` del fork y `nestedRepos` en el
+  resultado, junto al spread condicional de upstream.
+- **`main-process-quit.ts`:** upstream agregó `flushUnsavedCloudSessions()` en `before-quit`.
+  Se quedó ahí porque es un reintento de escrituras e inofensivo si se cancela el quit. El
+  desmontaje de servicios sigue en `will-quit` (fix Cmd+Q).
+- **Tests que ya fallaban antes del merge, ahora adaptados al fork:**
+  `main-process-quit-update-veto.test.ts` (el desmontaje no ocurre en un before-quit permitido)
+  y `main-window-core-services.test.ts` (mock de `../time-tracker/wire`).
+- **Commit del merge:** el pre-commit corre oxlint sobre todo lo staged y lo matan en un
+  merge grande. Se corrió oxlint a mano sobre los archivos resueltos y luego `--no-verify`.
+  El hook necesita `pnpm` 12: usar un shim de PATH que ejecute `corepack pnpm`.
+
 ### Merge 1.4.197 → 2026-10-11 (~2007 commits): OpenCode v2 + reubicaciones
 
 Motivo: la integración OpenCode v2 estaba a medias en 1.4.197 (opencode no salía en
