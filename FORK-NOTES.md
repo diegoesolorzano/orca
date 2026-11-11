@@ -368,8 +368,8 @@ corepack pnpm exec vitest run --config config/vitest.config.ts src/main/git/   #
 #
 # IMPORTANTE: electron-builder SOLO empaqueta; necesita `out/` ya construido. `build:mac` corre
 # build:desktop + helpers macOS ANTES del electron-builder, así que hay que correr esa cadena
-# (todo build:mac MENOS el build-mac-local.mjs final) y luego el electron-builder arm64:
-ID=$(node -e "import('./config/scripts/build-mac-local.mjs').then(m=>{const i=m.getLocalBuildIdentity();console.log(i.commit+'|'+i.version)})")
+# (todo build:mac MENOS el build-mac-local.mjs final, hoy en config/scripts/desktop-distribution/macos/) y luego el electron-builder arm64:
+ID=$(node -e "import('./config/scripts/desktop-distribution/macos/build-mac-local.mjs').then(m=>{const i=m.getLocalBuildIdentity();console.log(i.commit+'|'+i.version)})")
 COMMIT=${ID%%|*}; VERSION=${ID##*|}
 corepack pnpm run build:desktop \
   && corepack pnpm run build:computer-macos \
