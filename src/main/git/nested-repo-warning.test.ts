@@ -1,6 +1,6 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises'
-import { tmpdir } from 'os'
-import { join } from 'path'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NestedRepoScanResult } from '../../shared/project-group-types'
 
@@ -19,8 +19,9 @@ const { parseWslPathMock, toWindowsWslPathMock } = vi.hoisted(() => ({
   )
 }))
 
-vi.mock('../wsl', () => ({
-  parseWslPath: parseWslPathMock,
+vi.mock('../wsl/filesystem/unc-path-access', () => ({ parseWslPath: parseWslPathMock }))
+vi.mock('../../shared/wsl-paths', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   toWindowsWslPath: toWindowsWslPathMock
 }))
 

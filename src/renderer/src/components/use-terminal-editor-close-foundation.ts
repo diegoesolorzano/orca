@@ -6,7 +6,7 @@ import {
 } from './terminal/window-close-running-work'
 import type { TerminalWorkspaceProjectionController } from './use-terminal-workspace-projection'
 import { runWithWindowCloseCheckpointScope } from './window-close-request-coordinator'
-import { showShutdownCheckpointFailureToast } from '@/lib/shutdown-checkpoint-failure-toast'
+import { showShutdownCheckpointFailureToast } from '@/app-shell/shutdown/shutdown-checkpoint-failure-toast'
 
 export function useTerminalEditorCloseFoundation(
   controller: TerminalWorkspaceProjectionController
@@ -38,20 +38,16 @@ export function useTerminalEditorCloseFoundation(
     Exclude<WindowCloseRunningWork['kind'], 'none'> | 'quit'
   >('running')
   const windowCloseAfterDirtyRef = useRef<{ isQuitting: boolean } | null>(null)
-  // Why (fork): remember whether the open confirm dialog came from a Cmd+Q so a
-  // cancel can clear main's isQuitting latch (see cancelWindowClose).
-  const windowCloseIsQuittingRef = useRef(false)
 
   const confirmNativeWindowClose = useCallback(() => {
-    // Why: capture only after every close guard has committed. A canceled child-
-    // process prompt must not consume App's synthetic/native unload guard.
+    // Capture only after every close guard commits so canceled process prompts cannot consume App’s unload guard.
     const accepted = runWithWindowCloseCheckpointScope(() =>
       window.dispatchEvent(new Event('beforeunload', { cancelable: true }))
     )
     if (!accepted) {
-      // Why: a checkpoint-vetoed quit used to die here with no dialog and no log,
-      // leaving SIGKILL as the only exit (#15352). Dirty-file vetoes publish no reason.
+      // Report checkpoint-vetoed quits instead of silently trapping the window (#15352); dirty-file vetoes provide no reason.
       showShutdownCheckpointFailureToast()
+      window.api.ui.cancelWindowClose()
       return
     }
     window.api.ui.confirmWindowClose()
@@ -65,31 +61,16 @@ export function useTerminalEditorCloseFoundation(
             confirmNativeWindowClose()
             return
           }
-          windowCloseIsQuittingRef.current = isQuitting
           setWindowCloseDialogKind(runningWork.kind === 'none' ? 'quit' : runningWork.kind)
           setWindowCloseDialogOpen(true)
         })
-        // Why: the assessment must never be able to trap the window. A thrown store read is
-        // not evidence either way, and a close that silently does nothing is unrecoverable
-        // without SIGKILL, so fall through to the close the user actually asked for.
+        // Assessment exceptions prove neither live nor exited work; fall through so an unexpected store error cannot trap the window.
         .catch(() => {
           confirmNativeWindowClose()
         })
     },
     [confirmNativeWindowClose]
   )
-
-  // Why (fork): a cancelled Cmd+Q must clear main's isQuitting latch so a later
-  // plain window close isn't misclassified as a quit and the deferred service
-  // teardown (relay/rate-limits/agent-awake) never runs. Plain closes leave the
-  // latch untouched.
-  const cancelWindowClose = useCallback(() => {
-    setWindowCloseDialogOpen(false)
-    if (windowCloseIsQuittingRef.current) {
-      window.api.ui.abortWindowClose()
-      windowCloseIsQuittingRef.current = false
-    }
-  }, [])
 
   return {
     saveDialogFileId,
@@ -106,8 +87,7 @@ export function useTerminalEditorCloseFoundation(
     windowCloseDialogKind,
     windowCloseAfterDirtyRef,
     confirmNativeWindowClose,
-    proceedToNativeWindowClose,
-    cancelWindowClose
+    proceedToNativeWindowClose
   }
 }
 

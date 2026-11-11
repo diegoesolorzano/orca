@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, powerMonitor } from 'electron'
 import { splitWorktreeIdForFilesystem } from '../../shared/worktree/id'
-import type { Store } from '../persistence'
+import type { Store } from '../persistence/loading-store/store'
 import { createTrackerClient } from './client'
 import { buildCtx, type ContextLookup } from './context'
 import { createBranchResolver } from './git-branch'

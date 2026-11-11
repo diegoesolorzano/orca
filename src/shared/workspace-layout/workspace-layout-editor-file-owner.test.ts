@@ -4,13 +4,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../constants'
 import { LOCAL_EXECUTION_HOST_ID } from '../execution-host'
-import { ownedEditorFileId } from '../workspace-session-pane-ownership'
-import type { PersistedOpenFile, WorkspaceSessionState } from '../workspace-session-state-types'
+import { ownedEditorFileId } from '../workspace-session/workspace-session-pane-ownership'
+import type {
+  PersistedOpenFile,
+  WorkspaceSessionState
+} from '../workspace-session/workspace-session-state-types'
 import { applyLayoutCommand } from './workspace-layout-commands'
 import type { CommandOf } from './workspace-layout-command-types'
 import { build, testContext } from './workspace-layout-command.test-fixture'
+import { editorTabFile } from './workspace-layout-editor-tab-file'
 import { loadWorkspaceLayout } from './workspace-layout-load'
 import type { LayoutEditorFile, WorkspaceLayoutModel } from './workspace-layout-model'
+import { publishWorkspaceLayout } from './workspace-layout-published'
 import { patchStoredSession } from './workspace-layout-record-patch'
 import { saveWorkspaceLayout } from './workspace-layout-save'
 import { addWorkspace, emptySession, GIT_KEY } from './workspace-layout-session.test-fixture'
@@ -187,6 +192,52 @@ describe('editor file records keyed by path and owner, layout-owner build', () =
     )
 
     expect(patched.openFilesByWorktree?.[FLOATING]).toEqual([local, runtime])
+  })
+
+  it('a path-id tab names the local record when the runtime record is listed first', () => {
+    const { model } = build(testContext(), [
+      open(GIT_KEY, runtimeId(GIT_KEY), RUNTIME_FILE),
+      open(GIT_KEY, PATH, LOCAL_FILE)
+    ])
+    const workspace = model.workspaces[GIT_KEY]!
+    const hostOf = (entityId: string) =>
+      publishWorkspaceLayout(workspace, LOCAL_EXECUTION_HOST_ID).tabs.find(
+        (tab) => tab.entityId === entityId
+      )?.executionHostId
+
+    expect(owners(model, GIT_KEY)).toEqual([ENV, 'local'])
+    expect(editorTabFile(workspace, PATH)?.runtimeEnvironmentId).toBeUndefined()
+    expect(hostOf(PATH)).toBe(LOCAL_EXECUTION_HOST_ID)
+    expect(hostOf(runtimeId(GIT_KEY))).toBe(`runtime:${ENV}`)
+  })
+
+  it("a reload keeps a path-id preview tab's flag on its own owner's record only", () => {
+    const stored: WorkspaceSessionState = addWorkspace(emptySession(), GIT_KEY, [
+      {
+        id: 'group-1',
+        tabs: [
+          { id: PATH, kind: 'editor', entry: { isPreview: true } },
+          { id: runtimeId(GIT_KEY), kind: 'editor' }
+        ]
+      }
+    ])
+    stored.openFilesByWorktree = {
+      [GIT_KEY]: [
+        { ...RUNTIME_FILE, worktreeId: GIT_KEY },
+        { ...LOCAL_FILE, worktreeId: GIT_KEY, isPreview: true }
+      ]
+    }
+    let id = 0
+    const loaded = loadWorkspaceLayout(LOCAL_EXECUTION_HOST_ID, stored, {
+      mintId: () => `minted-${++id}`,
+      mintLeafId: () => `00000000-0000-4000-8000-${String(++id).padStart(12, '0')}`
+    })
+    const tabs = loaded.layout.workspaces[GIT_KEY]!.tabs
+
+    expect(tabs.map((tab) => tab.isPreview)).toEqual([true, undefined])
+    expect(saveWorkspaceLayout(loaded).openFilesByWorktree?.[GIT_KEY]).toEqual(
+      stored.openFilesByWorktree[GIT_KEY]
+    )
   })
 
   it('match by path alone when the switch is off, as a headless host does today', () => {

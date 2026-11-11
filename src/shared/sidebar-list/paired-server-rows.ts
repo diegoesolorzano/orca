@@ -1,10 +1,32 @@
-import { z } from 'zod'
-import type { ExecutionHostId } from '../execution-host'
-import { composeWorktreeHostIdentity } from '../worktree/host-qualified-identity'
+import * as z from 'zod'
+import {
+  getRepoExecutionHostId,
+  parseExecutionHostId,
+  type ExecutionHostId
+} from '../execution-host'
+import type { FolderWorkspace } from '../folder-workspaces/folder-workspace-types'
+import { folderWorkspaceToWorktree } from '../folder-workspaces/folder-workspace-worktree'
+import type { Repo } from '../repo-types'
+import {
+  composeWorktreeHostIdentity,
+  getWorktreeHostIdentity
+} from '../worktree/host-qualified-identity'
+import type {
+  CrossStoreWorkspaceLineage,
+  WorkspaceLineageEdge,
+  WorktreeLineage
+} from '../worktree/lineage-types'
+import type { Worktree } from '../worktree/types'
+import { getWorkspaceRowKindFacts } from '../worktree/workspace-kinds'
 import { openEnum } from '../zod-salvage'
 import { DEFAULT_WORKSPACE_STATUS_ID } from '../workspace-statuses'
 import { SMART_TIERS } from './sort-stamps'
-import { WorkspaceRowSchema } from './workspace-rows'
+import {
+  CrossStoreParentRecordSchema,
+  WorkspaceLineageEdgeSchema,
+  WorkspaceRowSchema
+} from './workspace-rows'
+import { HostReportedActivitySchema, type HostReportedActivity } from './workspace-activity-facts'
 
 /** One paired-server workspace as the sidebar lists it, keyed by its host-qualified id. */
 const PairedServerWorkspaceRowSchema = z
@@ -20,8 +42,7 @@ const PairedServerWorkspaceRowSchema = z
     isPinned: z.boolean()
   })
   .extend(
-    // What the list sorts, groups and filters by, as the server stamped it; older desktops omit them.
-    // `lineage` is the edge the server's own check kept, not its stored record.
+    // Server-owned sorting/filter/lineage facts; older desktops omit them. Lineage is the checked edge, not the raw record.
     WorkspaceRowSchema.pick({
       isMainWorktree: true,
       isUnread: true,
@@ -41,13 +62,26 @@ const PairedServerWorkspaceRowSchema = z
       smartAt: true
     }).partial().shape
   )
+  .extend({
+    /** The server's own terminals and agents there; older desktops omit it. */
+    activity: HostReportedActivitySchema.optional().catch(undefined),
+    crossStoreParent: CrossStoreParentRecordSchema,
+    workspaceLineage: WorkspaceLineageEdgeSchema,
+    /** An older server's edge without instance ids; only the phone accepts it, as before. */
+    legacyLineage: z
+      .object({ parentWorktreeId: z.string(), source: z.literal('no-instance-host') })
+      .optional()
+      .catch(undefined)
+  })
 
 /** See PairedServerHost; health and compatibility stay open strings, as a reader only compares them. */
 const PairedServerHostFactsSchema = z.object({
   label: z.string(),
   health: z.string(),
   compatibility: z.string().nullable(),
-  pairedDeviceId: z.string().nullable()
+  pairedDeviceId: z.string().nullable(),
+  /** The server's verified store identity, which cross-store records name; older desktops omit it. */
+  installationId: z.string().nullable().optional().catch(undefined)
 })
 
 /** Every configured server main lists rows for. Unverifiable: its last rows, not confirmed current. */
@@ -68,6 +102,74 @@ export type PairedServerHostFacts = z.infer<typeof PairedServerHostFactsSchema>
 
 export type PairedServerWorkspaceRow = z.infer<typeof PairedServerWorkspaceRowSchema>
 export type PairedServerRowsSnapshot = z.infer<typeof PairedServerRowsSnapshotSchema>
+
+/** A paired server's workspace as the window holds it, in the shape the server's own list reports. */
+export function pairedServerRowOfWorktree(
+  worktree: Worktree,
+  kind: PairedServerWorkspaceRow['kind'],
+  repo: Pick<Repo, 'kind'> | undefined,
+  lineage: WorktreeLineage | null | undefined,
+  crossStoreParent?: CrossStoreWorkspaceLineage,
+  workspaceLineage?: WorkspaceLineageEdge | null
+): PairedServerWorkspaceRow {
+  const key = getWorktreeHostIdentity(worktree)
+  // The server's reply carries no automation name, so the row leaves it out too.
+  const { automationName: _automationName, ...kindFacts } = getWorkspaceRowKindFacts(worktree, repo)
+  return {
+    key,
+    worktreeId: worktree.id,
+    repoId: worktree.repoId,
+    kind,
+    path: worktree.path,
+    branch: worktree.branch,
+    displayName: worktree.displayName,
+    isArchived: worktree.isArchived,
+    isPinned: worktree.isPinned,
+    isMainWorktree: worktree.isMainWorktree,
+    isUnread: worktree.isUnread,
+    instanceId: worktree.instanceId,
+    lineage: lineage
+      ? {
+          parentWorktreeId: lineage.parentWorktreeId,
+          worktreeInstanceId: lineage.worktreeInstanceId,
+          parentWorktreeInstanceId: lineage.parentWorktreeInstanceId
+        }
+      : null,
+    workspaceStatus: worktree.workspaceStatus ?? DEFAULT_WORKSPACE_STATUS_ID,
+    sortOrder: worktree.sortOrder,
+    manualOrder: worktree.manualOrder,
+    createdAt: worktree.createdAt,
+    creatorProvenance: worktree.creatorProvenance,
+    ...kindFacts,
+    recentAt: worktree.lastActivityAt,
+    smartTier: worktree.smartTier,
+    smartAt: worktree.smartAt,
+    ...(crossStoreParent ? { crossStoreParent } : {}),
+    ...(workspaceLineage ? { workspaceLineage } : {})
+  }
+}
+
+/** Host-qualified paired rows omitted by buildWorkspaceRows. */
+export function buildPairedServerRows(catalog: {
+  worktrees: readonly Worktree[]
+  folderWorkspaces: readonly FolderWorkspace[]
+  repos: readonly Repo[]
+  lineageById: Readonly<Record<string, WorktreeLineage>>
+}): Map<string, PairedServerWorkspaceRow> {
+  const rows = new Map<string, PairedServerWorkspaceRow>()
+  const add = (worktree: Worktree, kind: PairedServerWorkspaceRow['kind']): void => {
+    if (parseExecutionHostId(worktree.hostId)?.kind === 'runtime') {
+      const repo = catalog.repos.find(
+        (entry) => entry.id === worktree.repoId && getRepoExecutionHostId(entry) === worktree.hostId
+      )
+      const row = pairedServerRowOfWorktree(worktree, kind, repo, catalog.lineageById[worktree.id])
+      rows.set(row.key, row)
+    }
+  }
+  catalog.worktrees.forEach((worktree) => add(worktree, 'git'))
+  catalog.folderWorkspaces.forEach((folder) => add(folderWorkspaceToWorktree(folder), 'folder'))
+  return rows
+}
 
 // Older servers omit `workspaceKind` and may send arms this build has not heard of.
 const ServerWorktreePsRowSchema = z.object({
@@ -96,8 +198,27 @@ const ServerWorktreePsRowSchema = z.object({
   detachedHead: z.literal(true).optional().catch(undefined),
   lastActivityAt: z.number().optional().catch(undefined),
   smartTier: z.enum(SMART_TIERS).optional().catch(undefined),
-  smartAt: z.number().optional().catch(undefined)
+  smartAt: z.number().optional().catch(undefined),
+  liveTerminalCount: z.number().optional().catch(undefined),
+  unverifiableTerminalCount: z.number().optional().catch(undefined),
+  status: z.string().optional().catch(undefined),
+  workingMode: z.string().optional().catch(undefined),
+  crossStoreParent: CrossStoreParentRecordSchema,
+  workspaceLineage: WorkspaceLineageEdgeSchema
 })
+
+function reportedActivity(row: z.infer<typeof ServerWorktreePsRowSchema>): HostReportedActivity {
+  const working = row.workingMode === 'monitoring' ? 'monitoring' : 'working'
+  return {
+    terminal:
+      (row.liveTerminalCount ?? 0) > 0
+        ? 'live'
+        : (row.unverifiableTerminalCount ?? 0) > 0
+          ? 'unverifiable'
+          : null,
+    agent: row.status === 'permission' ? 'permission' : row.status === 'working' ? working : null
+  }
+}
 
 /** A server's own `worktree.ps` row, with defaults for what older servers omit; null without an id. */
 export function normalizePairedServerRow(
@@ -116,6 +237,10 @@ export function normalizePairedServerRow(
     parentWorktreeId,
     lineageWorktreeInstanceId,
     parentWorktreeInstanceId,
+    liveTerminalCount: _liveTerminalCount,
+    unverifiableTerminalCount: _unverifiableTerminalCount,
+    status: _status,
+    workingMode: _workingMode,
     ...fields
   } = parsed.data
   return {
@@ -132,6 +257,12 @@ export function normalizePairedServerRow(
             parentWorktreeInstanceId
           }
         : null,
-    recentAt: lastActivityAt
+    ...(parentWorktreeId &&
+    lineageWorktreeInstanceId === undefined &&
+    parentWorktreeInstanceId === undefined
+      ? { legacyLineage: { parentWorktreeId, source: 'no-instance-host' as const } }
+      : {}),
+    recentAt: lastActivityAt,
+    activity: reportedActivity(parsed.data)
   }
 }

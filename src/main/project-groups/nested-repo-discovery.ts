@@ -1,7 +1,9 @@
-import { readFile, readdir, stat } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises'
+import { basename, dirname, join, resolve } from 'node:path'
 import type { NestedRepoCandidate, NestedRepoScanResult } from '../../shared/project-group-types'
 import { isGitRepoAsync } from '../git/repo'
+import { awaitWindowsHostGitEnvironmentReady } from '../git/runner'
+import { parseWslUncPath } from '../../shared/wsl-paths'
 import {
   isIgnoredNestedRepoDirectory,
   normalizeNestedRepoScanOptions,
@@ -11,26 +13,94 @@ import {
   type TraversalFolder
 } from './nested-repo-scan-rules'
 
+async function probeGitMarkers(dirPath: string): Promise<{
+  hasGitMarker: boolean
+  possibleGitMarker: boolean
+}> {
+  let possibleGitMarker = false
+  const readMarker = async (name: string) => {
+    const path = join(dirPath, name)
+    try {
+      const entry = await lstat(path)
+      // Entry presence includes broken links and incomplete metadata; Git remains authoritative.
+      possibleGitMarker = true
+      return entry.isSymbolicLink() ? await stat(path).catch(() => null) : entry
+    } catch (error) {
+      if (
+        !error ||
+        typeof error !== 'object' ||
+        !('code' in error) ||
+        (error.code !== 'ENOENT' && error.code !== 'ENOTDIR')
+      ) {
+        possibleGitMarker = true
+      }
+      return null
+    }
+  }
+  const marker = await readMarker('.git')
+  if (marker?.isDirectory() === true || marker?.isFile() === true) {
+    return { hasGitMarker: true, possibleGitMarker: true }
+  }
+  const [head, objects, refs] = await Promise.all(['HEAD', 'objects', 'refs'].map(readMarker))
+  return {
+    hasGitMarker:
+      head?.isFile() === true && objects?.isDirectory() === true && refs?.isDirectory() === true,
+    possibleGitMarker
+  }
+}
+
 async function hasGitMarker(dirPath: string): Promise<boolean> {
+  return (await probeGitMarkers(dirPath)).hasGitMarker
+}
+
+async function mayNeedGitDiscovery(path: string, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) {
+    return false
+  }
   try {
-    const marker = await stat(join(dirPath, '.git'))
-    if (marker.isDirectory() || marker.isFile()) {
+    if (process.platform === 'win32') {
+      // WSL can discover Git through its shell environment rather than this process's environment.
+      if (parseWslUncPath(path)) {
+        return true
+      }
+      await awaitWindowsHostGitEnvironmentReady({ cwd: path })
+    }
+    if (
+      process.env.GIT_DIR !== undefined ||
+      process.env.GIT_WORK_TREE !== undefined ||
+      process.env.GIT_COMMON_DIR !== undefined ||
+      Object.keys(process.env).some((key) =>
+        (process.platform === 'win32' ? key.toUpperCase() : key).startsWith('GIT_CONFIG')
+      )
+    ) {
       return true
     }
+    const roots = new Set([resolve(path), await realpath(path)])
+    for (const root of roots) {
+      let current = root
+      while (true) {
+        if (signal?.aborted) {
+          return false
+        }
+        const markers = await probeGitMarkers(current)
+        if (markers.possibleGitMarker) {
+          return true
+        }
+        const parent = dirname(current)
+        if (parent === current) {
+          break
+        }
+        current = parent
+      }
+    }
+    return false
   } catch {
-    // Continue to cheap bare-repository marker checks below.
+    return true
   }
-  const [head, objects, refs] = await Promise.all([
-    stat(join(dirPath, 'HEAD')).catch(() => null),
-    stat(join(dirPath, 'objects')).catch(() => null),
-    stat(join(dirPath, 'refs')).catch(() => null)
-  ])
-  return head?.isFile() === true && objects?.isDirectory() === true && refs?.isDirectory() === true
 }
 
 async function readLocalDirectory(dirPath: string): Promise<NestedRepoDirectoryEntry[]> {
-  // Why: Dirent data avoids one stat per child and keeps symlinked directories
-  // from expanding the scan outside the selected folder.
+  // Dirents avoid per-child stat and prevent symlink traversal outside the selected folder.
   const entries = await readdir(dirPath, { withFileTypes: true })
   return entries.map((entry) => ({
     name: entry.name,
@@ -42,7 +112,9 @@ async function readLocalDirectory(dirPath: string): Promise<NestedRepoDirectoryE
 // Why (fork): exported so callers that scan INSIDE a git repo (e.g. the worktree-create
 // nested-repo warning) can reuse the local filesystem while overriding individual hooks
 // such as `isSelectedPathGitRepo` or `readTextFile`.
-export function createLocalNestedRepoScanFilesystem(): NestedRepoScanFilesystem {
+export function createLocalNestedRepoScanFilesystem(
+  signal?: AbortSignal
+): NestedRepoScanFilesystem {
   return {
     readDirectory: readLocalDirectory,
     readTextFile: (path: string) => readFile(path, 'utf8'),
@@ -50,7 +122,9 @@ export function createLocalNestedRepoScanFilesystem(): NestedRepoScanFilesystem 
     basename,
     hasGitMarker,
     isSelectedPathGitRepo: async (path: string) =>
-      (await isGitRepoAsync(path)) || (await hasGitMarker(path))
+      (await mayNeedGitDiscovery(path, signal)) &&
+      !signal?.aborted &&
+      ((await isGitRepoAsync(path)) || (await hasGitMarker(path)))
   }
 }
 
@@ -67,7 +141,7 @@ export async function scanNestedRepos(args: {
   let truncated = false
   let timedOut = false
   let stopped = false
-  const filesystem = args.filesystem ?? createLocalNestedRepoScanFilesystem()
+  const filesystem = args.filesystem ?? createLocalNestedRepoScanFilesystem(args.signal)
   const buildResult = (selectedPathKind: NestedRepoScanResult['selectedPathKind']) => ({
     selectedPath: args.path,
     selectedPathKind,
@@ -166,8 +240,7 @@ export async function scanNestedRepos(args: {
         continue
       }
       const childPath = filesystem.joinPath(currentFolder.path, name)
-      // Why: broad scans should use cheap filesystem markers instead of
-      // spawning Git for every candidate directory, especially over SSH.
+      // Filesystem markers avoid per-directory Git spawns, especially over SSH.
       const childHasGitMarker = await filesystem.hasGitMarker(childPath)
       if (noteAbort()) {
         break
@@ -179,12 +252,10 @@ export async function scanNestedRepos(args: {
           depth: currentFolder.depth + 1
         })
         emitProgress()
-        // Project Groups organize sibling repos; nested repos stay hidden until a
-        // later UI can explain and select submodule-style layouts explicitly.
+        // Hide submodule-style descendants until the group UI supports selecting them.
         continue
       }
-      // Why: group import should prefer nearby sibling repos over spending the
-      // bounded scan inside an alphabetically early, deeply nested folder.
+      // Breadth-first traversal spends the bounded scan on nearby siblings before deep branches.
       if (currentFolder.depth < options.maxDepth) {
         foldersToTraverse.push({
           path: childPath,

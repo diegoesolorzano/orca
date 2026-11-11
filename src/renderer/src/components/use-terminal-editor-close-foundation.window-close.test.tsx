@@ -9,12 +9,10 @@
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { assessWindowCloseRunningWorkMock, confirmWindowCloseMock, abortWindowCloseMock } =
-  vi.hoisted(() => ({
-    assessWindowCloseRunningWorkMock: vi.fn(),
-    confirmWindowCloseMock: vi.fn(),
-    abortWindowCloseMock: vi.fn()
-  }))
+const { assessWindowCloseRunningWorkMock, confirmWindowCloseMock } = vi.hoisted(() => ({
+  assessWindowCloseRunningWorkMock: vi.fn(),
+  confirmWindowCloseMock: vi.fn()
+}))
 
 vi.mock('./terminal/window-close-running-work', () => ({
   assessWindowCloseRunningWork: assessWindowCloseRunningWorkMock
@@ -40,9 +38,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   Object.assign(globalThis, {
     window: Object.assign(globalThis.window, {
-      api: {
-        ui: { confirmWindowClose: confirmWindowCloseMock, abortWindowClose: abortWindowCloseMock }
-      }
+      api: { ui: { confirmWindowClose: confirmWindowCloseMock, cancelWindowClose: vi.fn() } }
     })
   })
 })
@@ -77,25 +73,6 @@ describe('proceedToNativeWindowClose', () => {
 
     expect(confirmWindowCloseMock).toHaveBeenCalledTimes(1)
     expect(result.current.windowCloseDialogOpen).toBe(false)
-  })
-
-  it('fork: cancelling a Cmd+Q dialog clears the quit latch; cancelling a plain close does not', async () => {
-    assessWindowCloseRunningWorkMock.mockResolvedValue({ kind: 'none' })
-    const { result } = mountFoundation()
-
-    await act(async () => {
-      result.current.proceedToNativeWindowClose(true)
-    })
-    act(() => result.current.cancelWindowClose())
-    expect(abortWindowCloseMock).toHaveBeenCalledTimes(1)
-    expect(result.current.windowCloseDialogOpen).toBe(false)
-
-    assessWindowCloseRunningWorkMock.mockResolvedValue({ kind: 'running' })
-    await act(async () => {
-      result.current.proceedToNativeWindowClose(false)
-    })
-    act(() => result.current.cancelWindowClose())
-    expect(abortWindowCloseMock).toHaveBeenCalledTimes(1)
   })
 
   it('raises the dialog and does not close when a host reports live work', async () => {

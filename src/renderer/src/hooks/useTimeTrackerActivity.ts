@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useActiveWorktree } from '../store/selectors'
+import { useActiveWorktree } from '../store/workspaces/selection/use-selected-worktree'
 
 const ACTIVITY_THROTTLE_MS = 5_000
 

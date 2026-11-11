@@ -26,7 +26,9 @@ puede arreglarlo porque el fallo ocurre ANTES de que corra.
 
 ## El fix
 
-`src/main/git/worktree.ts` — espejo del patron ya existente en `addSparseWorktree`:
+`src/main/git/worktrees/creation/worktree-add.ts` llama a `planGitCryptWorktreeAdd` y
+`finishGitCryptWorktreeCheckout` de `worktree-git-crypt-keys.ts` (mismo directorio), espejo del
+patron ya existente en `addSparseWorktree`:
 
 1. Detecta `git-crypt/` en el git dir del repo (probe de filesystem, layouts normal y bare)
 2. Si existe → `git worktree add --no-checkout`
@@ -34,7 +36,7 @@ puede arreglarlo porque el fallo ocurre ANTES de que corra.
 4. `git checkout <branch>` en el worktree
 5. Si el checkout diferido falla → rollback (worktree remove + branch -D)
 
-Tests: `src/main/git/worktree-git-crypt.test.ts` (6 casos).
+Tests: `src/main/git/worktrees/creation/worktree-git-crypt.test.ts` (6 casos).
 Limitacion conocida: solo path local; el relay SSH (`src/relay/git-handler-worktree-ops.ts`)
 quedo sin cambios porque solo dispone de un ejecutor `git` (sin file ops remotas).
 
@@ -172,10 +174,11 @@ que **Cmd+Q siempre pida confirmación**, con **cancelación segura**.
 
 - Flujo: `app before-quit` → `window 'close'` (preventDefault) → IPC `window:close-requested`
   `{isQuitting}` → el renderer muestra el diálogo → `window:confirm-close` (cerrar) o
-  `window:quit-aborted` (cancelar).
+  `window:close-cancelled` (cancelar; canal de upstream desde 2026-11).
 - Cancelación segura: **todo** el teardown de servicios se movió de `before-quit` a
   `will-quit`, que solo corre en una salida real. `before-quit` deja solo el latch
-  reversible `isQuitting=true`; `window:quit-aborted` lo limpia vía `onQuitAborted`.
+  reversible `isQuitting=true`; el `window:close-cancelled` de upstream lo limpia vía
+  `onQuitAborted` (guardado por remitente, último ack y `isQuitting`).
   Así cancelar un Cmd+Q deja Orca 100% funcional.
   - **Invariante al mergear upstream:** si upstream agrega teardown nuevo a
     `before-quit`, hay que MOVERLO a `will-quit`. Hoy son `rateLimits.stop()`,
@@ -183,10 +186,11 @@ que **Cmd+Q siempre pida confirmación**, con **cancelación segura**.
     `desktopRelayService.fenceAndCloseNow()` +
     `runtimeRpc.setMobileRelayPairingProvider(null)`. Lo único que queda en
     `before-quit` es el latch y logging inocuo (`isQuittingForUpdate`).
-- Archivos: `src/renderer/src/components/Terminal.tsx` (diálogo + texto condicional +
-  `cancelWindowClose`), `src/preload/index.ts` + `api-types.ts` + `web/web-preload-api.ts`
-  (`abortWindowClose`), `src/main/window/createMainWindow.ts` (canal `window:quit-aborted`),
-  `src/main/index.ts` (teardown movido a `will-quit`).
+- Archivos: `use-terminal-editor-close-foundation.ts` (`proceedToNativeWindowClose` abre el
+  diálogo con kind `'quit'` aunque no haya nada corriendo), `TerminalWorkspaceDialogs.tsx`
+  (textos "Quit Orca?"), `src/main/startup/main-process-quit.ts` (teardown en `will-quit`).
+  Desde el merge 2026-11-11 el fork ya NO tiene `abortWindowClose` ni `window:quit-aborted`:
+  usa el `cancelWindowClose` de upstream.
 - Desde 1.4.176 el fork ADOPTA `confirmNativeWindowClose` de upstream (dispara un
   `beforeunload` cancelable y aborta si un guard lo veta) y solo conserva su
   `proceedToNativeWindowClose` propio, que abre el diálogo siempre que
@@ -388,6 +392,28 @@ corepack pnpm run build:desktop \
 ./scripts/fork-swap-app.sh              # en una terminal FUERA de Orca
 ./scripts/fork-sync-provider-hooks.sh   # re-sincroniza hooks de kimi/minimax/zai
 ```
+
+### Merge 2026-10-19 → 2026-11-11 (5688 commits): 30 conflictos
+
+Upstream reorganizó carpetas a gran escala (agent-launch, agent-status, git, updater,
+pane-manager). Casi todos los conflictos fueron reubicaciones de archivos parcheados:
+- **Borrados por upstream (poda de tests):** se aceptó el borrado de los tests de upstream que
+  el fork solo había hecho fork-aware. Los tests propios del fork se rescataron en archivos
+  `*.redraw.test.ts` / `window-close.test.tsx` junto al código nuevo.
+- **Rutas nuevas:** `TuiAgent` en `shared/agent-launch/catalog/tui-agent.ts`; iconos en
+  `shared/agent-status/presentation/agent-type-icon-agent.ts`; `worktree-add.ts` en
+  `main/git/worktrees/creation/`; updater en `main/updater/lifecycle/`; redraw en
+  `pane-manager/terminal-rendering/`; store del panel de Actividad en
+  `use-agent-pane-thread-store-data.ts` (campo `paneForegroundAgentByPaneKey`).
+- **Cmd+Q:** upstream agregó su propio cancel (`cancelWindowClose`); el fork dejó el suyo.
+  Upstream volvió a meter teardown en `before-quit` (incluido `desktopConnectorCloud()?.fence()`):
+  todo se movió a `will-quit`, después de `flushPaneGrids()`.
+- **max-lines (300, sin disable):** las partes del fork salieron a archivos propios:
+  `worktree-git-crypt-keys.ts`, `tui-agent-config-fork-wrappers.ts` (`withForkClaudeWrappers`)
+  y `definitions-fork-terminal-redraw.ts`.
+- **PR upstream #38581 (cuenta de Claude/Codex por proyecto):** NO se integró. Su base quedó
+  1497 commits atrás y choca con upstream/main en 23 archivos; se espera a que upstream lo
+  mergee. El brief propio (`docs-fork/specs/orca-30567-...`) queda reemplazado por ese PR.
 
 ### Merge 2026-10-11 → 2026-10-19 (1470 commits): 3 conflictos
 

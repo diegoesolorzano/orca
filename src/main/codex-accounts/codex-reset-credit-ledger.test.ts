@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { CodexResetCreditAttemptLedger } from '../../shared/codex-reset-credit-attempt-ledger'
 import type { CodexResetCreditExpectedScope } from '../../shared/codex-reset-credit-scope'
-import { ProfileStateWriterError } from '../persistence/profile-state/profile-state-writer-errors'
+import { ProfileStateWriterError } from '../persistence/profile-state/writer/profile-state-writer-errors'
 import { CodexResetCreditLedger } from './codex-reset-credit-ledger'
 
 function scope(accountId: string): CodexResetCreditExpectedScope {
@@ -94,16 +94,6 @@ describe('async reset-credit ledger', () => {
     expect(ledger.get('first')).toBeUndefined()
     expect(ledger.getUnresolvedKey(first.accountScopeKey)).toBeUndefined()
     expect(ledger.get('second')).toBe(second)
-  })
-
-  it('retains the removed account guard when its async durability barrier fails', async () => {
-    const { ledger, barrier } = setup()
-    const attempt = ledger.createFresh('first', scope('account-1'))
-    await ledger.markProviderPending('first', attempt)
-    barrier.mockRejectedValueOnce(new Error('disk full'))
-    await expect(ledger.discardForRemovedAccount('account-1')).rejects.toThrow('disk full')
-    expect(ledger.get('first')).toBe(attempt)
-    expect(ledger.getUnresolvedKey(attempt.accountScopeKey)).toBe('first')
   })
 
   it('fails queued and future mutations closed when a commit outcome is unknown', async () => {

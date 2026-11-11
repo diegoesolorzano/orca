@@ -3,7 +3,8 @@ import {
   createLocalNestedRepoScanFilesystem,
   scanNestedRepos
 } from '../project-groups/nested-repo-discovery'
-import { parseWslPath, toWindowsWslPath } from '../wsl'
+import { toWindowsWslPath } from '../../shared/wsl-paths'
+import { parseWslPath } from '../wsl/filesystem/unc-path-access'
 import { gitExecFileAsync } from './runner'
 
 export const NESTED_REPO_DISPLAY_CAP = 10

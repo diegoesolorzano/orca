@@ -1,6 +1,6 @@
-import type { OrcaCloudAuthConfig } from '../../orca-profiles/profile-cloud-auth-config'
+import type { OrcaCloudAuthConfig } from '../../orca-profiles/cloud-auth/profile-cloud-auth-config'
 import { ensureActiveOrcaProfile } from '../../orca-profiles/profile-index-store'
-import { readFreshOrcaCloudSession } from '../../orca-profiles/profile-cloud-session-refresh'
+import { readFreshOrcaCloudSession } from '../../orca-profiles/cloud-session/profile-cloud-session-refresh'
 import type { RelayAuthContext } from './relay-auth-identity'
 
 export async function readRelayAuthContext(
@@ -15,8 +15,7 @@ export async function readRelayAuthContext(
   if (session.status !== 'found') {
     return null
   }
-  // Why: refresh and org-selection can rewrite cloud linkage while the request
-  // is in flight; identity must come from the post-refresh profile state.
+  // Refresh/org selection can change linkage; derive identity from post-refresh profile state.
   const refreshed = ensureActiveOrcaProfile(userDataPath)
   const cloud = refreshed.profile.cloud
   if (!cloud || refreshed.profile.id !== active.profile.id) {

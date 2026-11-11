@@ -1,5 +1,6 @@
 import type { KeybindingDefinition } from './types'
 import { platformBindings } from './definitions-support'
+import { FORK_TERMINAL_REDRAW_KEYBINDING } from './definitions-fork-terminal-redraw'
 
 export const KEYBINDING_DEFINITION_CORE_3: readonly KeybindingDefinition[] = [
   {
@@ -134,7 +135,7 @@ export const KEYBINDING_DEFINITION_CORE_3: readonly KeybindingDefinition[] = [
     title: 'Send Review Notes to Agent',
     group: 'Global',
     scope: 'global',
-    // Why: fires from the global capture handler even while the editor is focused, so Settings must warn on collisions with editor chords (e.g. Add Review Note) too, not just global ones.
+    // Global capture also fires in editors; include editor collisions such as Add Review Note in Settings warnings.
     conflictGroup: 'editor',
     searchKeywords: [
       'shortcut',
@@ -260,16 +261,9 @@ export const KEYBINDING_DEFINITION_CORE_3: readonly KeybindingDefinition[] = [
     group: 'Terminal Panes',
     scope: 'terminal',
     searchKeywords: ['shortcut', 'pane', 'clear'],
-    defaultBindings: platformBindings(['Mod+K'])
+    defaultBindings: platformBindings([])
   },
-  {
-    id: 'terminal.redraw',
-    title: 'Redraw terminal',
-    group: 'Terminal Panes',
-    scope: 'terminal',
-    searchKeywords: ['shortcut', 'redraw', 'repaint', 'glyph', 'atlas', 'corrupt', 'webgl'],
-    defaultBindings: platformBindings(['Mod+Alt+L'])
-  },
+  FORK_TERMINAL_REDRAW_KEYBINDING,
   {
     id: 'terminal.focusNextPane',
     title: 'Focus next pane',
